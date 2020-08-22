@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Pages on F* in Practice</title>
+    <link>/fstar-in-practice/pages/</link>
+    <description>F* in Practice (Pages)</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-US</language>
+    <lastBuildDate>2020-08-22</lastBuildDate>
+    
+    <atom:link href="/fstar-in-practice/pages/index.xml" rel="self" type="application/rss+xml" />
+    
+    
+    <item>
+      <title>About</title>
+      <link>/fstar-in-practice/pages/about/</link>
+      <pubDate>2020-08-22</pubDate>
+      
+      <guid>/fstar-in-practice/pages/about/</guid>
+      <description>
+
+&lt;p&gt;&lt;a href=&#34;https://fstar-lang.org/&#34;&gt;F*&lt;/a&gt; is a programming language with support for dependent types, which lets you write machine-verified correctness proofs for your code.
+It uses the &lt;a href=&#34;https://en.wikipedia.org/wiki/Z3%5FTheorem%5FProver&#34;&gt;Z3 SMT solver&lt;/a&gt; to automatically fill in the gaps in the proofs you write.
+I believe that the features of F* are useful for general purpose programming, and this site documents the things I learn when developing applications in F*.&lt;/p&gt;
+
+&lt;h2 id=&#34;contact&#34;&gt;Contact&lt;/h2&gt;
+
+&lt;p&gt;Comments and suggestions are very welcome.
+I can be reached through the &lt;a href=&#34;https://fstar.zulipchat.com/&#34;&gt;F* Zulip chat&lt;/a&gt;, where I am known as Semitangential.&lt;/p&gt;
+
+&lt;h2 id=&#34;technology-choices-and-licenses&#34;&gt;Technology choices and licenses&lt;/h2&gt;
+
+&lt;p&gt;This site is generated using &lt;a href=&#34;https://ox-hugo.scripter.co/&#34;&gt;ox-hugo&lt;/a&gt; and &lt;a href=&#34;https://gohugo.io/&#34;&gt;Hugo&lt;/a&gt;. It&amp;rsquo;s theme is based on the &lt;a href=&#34;https://github.com/Mitrichius/hugo-theme-anubis/blob/43d588d7cdfdda057b91af5213da47522d3a2e87/LICENSE&#34;&gt;MIT licensed&lt;/a&gt; &lt;a href=&#34;https://github.com/mitrichius/hugo-theme-anubis&#34;&gt;Anubis theme&lt;/a&gt;.&lt;/p&gt;
+</description>
+    </item>
+    
+  </channel>
+</rss>

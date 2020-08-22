@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+  xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  
+  <url>
+    <loc>/fstar-in-practice/pages/about/</loc>
+    <lastmod>2020-08-22</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/categories/</loc>
+    <lastmod>2020-08-22</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/</loc>
+    <lastmod>2020-08-22</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/posts/</loc>
+    <lastmod>2020-08-22</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/posts/setting-up-an-fstar-development-environment/</loc>
+    <lastmod>2020-08-22</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/tags/setup/</loc>
+    <lastmod>2020-08-22</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/categories/setup/</loc>
+    <lastmod>2020-08-22</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/tags/</loc>
+    <lastmod>2020-08-22</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/pages/</loc>
+    <lastmod>2020-08-22</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/series/</loc>
+  </url>
+  
+</urlset>
+
