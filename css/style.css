@@ -123,6 +123,12 @@ code.language-text {
     white-space: pre-wrap;
 }
 
+a code,
+a pre,
+a kbd {
+    color: unset;
+}
+
 /* Styles */
 
 blockquote {

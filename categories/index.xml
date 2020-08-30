@@ -6,10 +6,19 @@
     <description>F* in Practice (Categories)</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-US</language>
-    <lastBuildDate>2020-08-22</lastBuildDate>
+    <lastBuildDate>2020-08-30</lastBuildDate>
     
     <atom:link href="/fstar-in-practice/categories/index.xml" rel="self" type="application/rss+xml" />
     
+    
+    <item>
+      <title>libraries</title>
+      <link>/fstar-in-practice/categories/libraries/</link>
+      <pubDate>2020-08-30</pubDate>
+      
+      <guid>/fstar-in-practice/categories/libraries/</guid>
+      <description></description>
+    </item>
     
     <item>
       <title>setup</title>

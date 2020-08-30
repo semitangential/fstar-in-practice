@@ -9,26 +9,41 @@
   
   <url>
     <loc>/fstar-in-practice/categories/</loc>
-    <lastmod>2020-08-22</lastmod>
+    <lastmod>2020-08-30</lastmod>
   </url>
   
   <url>
     <loc>/fstar-in-practice/</loc>
-    <lastmod>2020-08-22</lastmod>
+    <lastmod>2020-08-30</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/categories/libraries/</loc>
+    <lastmod>2020-08-30</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/tags/ocaml/</loc>
+    <lastmod>2020-08-30</lastmod>
   </url>
   
   <url>
     <loc>/fstar-in-practice/posts/</loc>
-    <lastmod>2020-08-22</lastmod>
+    <lastmod>2020-08-30</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/tags/</loc>
+    <lastmod>2020-08-30</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/posts/using-ocaml-libraries-in-fstar/</loc>
+    <lastmod>2020-08-30</lastmod>
   </url>
   
   <url>
     <loc>/fstar-in-practice/posts/setting-up-an-fstar-development-environment/</loc>
-    <lastmod>2020-08-22</lastmod>
-  </url>
-  
-  <url>
-    <loc>/fstar-in-practice/tags/setup/</loc>
     <lastmod>2020-08-22</lastmod>
   </url>
   
@@ -38,7 +53,7 @@
   </url>
   
   <url>
-    <loc>/fstar-in-practice/tags/</loc>
+    <loc>/fstar-in-practice/tags/setup/</loc>
     <lastmod>2020-08-22</lastmod>
   </url>
   

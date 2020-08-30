@@ -6,10 +6,117 @@
     <description>F* in Practice (Posts)</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-US</language>
-    <lastBuildDate>2020-08-22</lastBuildDate>
+    <lastBuildDate>2020-08-30</lastBuildDate>
     
     <atom:link href="/fstar-in-practice/posts/index.xml" rel="self" type="application/rss+xml" />
     
+    
+    <item>
+      <title>Using OCaml libraries in F*</title>
+      <link>/fstar-in-practice/posts/using-ocaml-libraries-in-fstar/</link>
+      <pubDate>2020-08-30</pubDate>
+      
+      <guid>/fstar-in-practice/posts/using-ocaml-libraries-in-fstar/</guid>
+      <description>&lt;p&gt;Since F* has a small ecosystem, there are few libraries written in F*. This means that larger projects will likely need to interact with code written in other languages. Fortunately, OCaml has a large ecosystem which we can use from F*.&lt;/p&gt;
+
+&lt;p&gt;To illustrate how this works, we will write an F* program which uses the OCaml &lt;a href=&#34;https://github.com/ocaml-community/yojson&#34;&gt;Yojson&lt;/a&gt; library to serialize and deserialize JSON.&lt;/p&gt;
+
+&lt;p&gt;Examples from this post can be found &lt;a href=&#34;./examples/&#34;&gt;here&lt;/a&gt;.&lt;/p&gt;
+
+&lt;div class=&#34;ox-hugo-toc toc&#34;&gt;
+&lt;div&gt;&lt;/div&gt;
+
+&lt;div class=&#34;heading&#34;&gt;Table of Contents&lt;/div&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;#optional-making-sure-the-library-works-from-ocaml-code&#34;&gt;Optional: Making sure the library works from OCaml code&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;#writing-an-f-interface-file&#34;&gt;Writing an F* interface file&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;#writing-an-f-program&#34;&gt;Writing an F* program&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;#limitations&#34;&gt;Limitations&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;/div&gt;
+&lt;!--endtoc--&gt;&lt;/p&gt;
+
+&lt;h2 id=&#34;optional-making-sure-the-library-works-from-ocaml-code&#34;&gt;Optional: Making sure the library works from OCaml code&lt;/h2&gt;
+
+&lt;p&gt;Before getting to the F* part, we write a small OCaml program to verify that the library we want to use is accessible, and to have a working example for comparison in case we run in to problems with the code we extract from F*:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;open&lt;/span&gt; &lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;Yojson&lt;/span&gt;.&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Basic&lt;/span&gt;
+
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; main () = output_string stdout
+    (&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;Yojson&lt;/span&gt;.&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;Basic&lt;/span&gt;.pretty_to_string (&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;Yojson&lt;/span&gt;.&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;Basic&lt;/span&gt;.from_channel stdin))
+
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; () = main ()&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;div class=&#34;src-block-caption&#34;&gt;
+  &lt;span class=&#34;src-block-number&#34;&gt;Code Snippet 1&lt;/span&gt;:
+  &lt;a href=&#34;./examples/OCamlJSON.ml&#34;&gt;&lt;code&gt;OCamlJSON.ml&lt;/code&gt;&lt;/a&gt;
+&lt;/div&gt;
+
+&lt;p&gt;After putting this code in a file called &lt;code&gt;OCamlJSON.ml&lt;/code&gt;, we can build it and run it to verify that it gives the expected pretty-printed output.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-text&#34; data-lang=&#34;text&#34;&gt;$ opam exec -- ocamlfind opt -package yojson -linkpkg -g OCamlJSON.ml -o OCamlJSON
+$ echo &amp;#39;{&amp;#34;array&amp;#34;: [1, 2, &amp;#34;text&amp;#34;],&amp;#34;integer&amp;#34;:500,float:30.744}&amp;#39; | ./OCamlJSON
+{ &amp;#34;array&amp;#34;: [ 1, 2, &amp;#34;text&amp;#34; ], &amp;#34;integer&amp;#34;: 500, &amp;#34;float&amp;#34;: 30.744 }&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;h2 id=&#34;writing-an-f-interface-file&#34;&gt;Writing an F* interface file&lt;/h2&gt;
+
+&lt;p&gt;We want to be able to write F* programs which extract to OCaml code which calls the &lt;code&gt;Yojson&lt;/code&gt; code in the same way as in the OCaml example above.
+The way we do this is by writing an F* interface file which contains F* versions of the declarations of the functions we want to use:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;module&lt;/span&gt; &lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;Yojson&lt;/span&gt;.&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Basic&lt;/span&gt;
+
+assume &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;type&lt;/span&gt; t
+
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; pretty_to_string : t -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Tot&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;string&lt;/span&gt;
+
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; from_string : &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;string&lt;/span&gt; -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Ex&lt;/span&gt; t&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;div class=&#34;src-block-caption&#34;&gt;
+  &lt;span class=&#34;src-block-number&#34;&gt;Code Snippet 2&lt;/span&gt;:
+  &lt;a href=&#34;./examples/Yojson.Basic.fsti&#34;&gt;&lt;code&gt;Yojson.Basic.fsti&lt;/code&gt;&lt;/a&gt;
+&lt;/div&gt;
+
+&lt;p&gt;To correctly write the types of these functions, we carefully read the documentation or source code of the library in question.
+Note that we have given the &lt;code&gt;pretty_to_string&lt;/code&gt; function the &lt;code&gt;Tot&lt;/code&gt; effect, since any JSON object can be pretty-printed, while the &lt;code&gt;from_string&lt;/code&gt; function has the &lt;code&gt;Ex&lt;/code&gt; effect to allow for exceptions due to parsing errors.
+Giving incorrect effects or types to the functions in the interface files will cause the extracted OCaml code to not type check or, worse, contain bugs.&lt;/p&gt;
+
+&lt;h2 id=&#34;writing-an-f-program&#34;&gt;Writing an F* program&lt;/h2&gt;
+
+&lt;p&gt;We can now write an F* program referring to the interface file, and build it against the OCaml library.
+Our program looks like this:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;module&lt;/span&gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;FStarJSON&lt;/span&gt;
+
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; main = &lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;FStar&lt;/span&gt;.&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;IO&lt;/span&gt;.print_string (&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;Yojson&lt;/span&gt;.&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;Basic&lt;/span&gt;.pretty_to_string
+    (&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;Yojson&lt;/span&gt;.&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;Basic&lt;/span&gt;.from_string (&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;FStar&lt;/span&gt;.&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;IO&lt;/span&gt;.input_line())))&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;div class=&#34;src-block-caption&#34;&gt;
+  &lt;span class=&#34;src-block-number&#34;&gt;Code Snippet 3&lt;/span&gt;:
+  &lt;a href=&#34;./examples/FStarJSON.fst&#34;&gt; &lt;code&gt;FStarJSON.fst&lt;/code&gt;&lt;/a&gt;
+&lt;/div&gt;
+
+&lt;p&gt;After extracting OCaml code from the F* code with&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-text&#34; data-lang=&#34;text&#34;&gt;~/opt/fstar/bin/fstar.exe --codegen OCaml --codegen-lib Yojson --extract FStarJSON FStarJSON.fst&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;and building the extracted OCaml code with&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-text&#34; data-lang=&#34;text&#34;&gt;OCAMLPATH=~/opt/fstar/bin/ opam exec -- ocamlfind opt -package yojson,fstarlib -linkpkg -g FStarJSON.ml -o FStarJSON&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;we can run the program&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-text&#34; data-lang=&#34;text&#34;&gt;echo &amp;#39;{&amp;#34;array&amp;#34;: [1, 2, &amp;#34;text&amp;#34;],&amp;#34;integer&amp;#34;:500,float:30.744}&amp;#39; | ./FStarJSON&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;and observe the expected output:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-json&#34; data-lang=&#34;json&#34;&gt;{ &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;&amp;#34;array&amp;#34;&lt;/span&gt;: [ &lt;span style=&#34;color:#b452cd&#34;&gt;1&lt;/span&gt;, &lt;span style=&#34;color:#b452cd&#34;&gt;2&lt;/span&gt;, &lt;span style=&#34;color:#cd5555&#34;&gt;&amp;#34;text&amp;#34;&lt;/span&gt; ], &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;&amp;#34;integer&amp;#34;&lt;/span&gt;: &lt;span style=&#34;color:#b452cd&#34;&gt;500&lt;/span&gt;, &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;&amp;#34;float&amp;#34;&lt;/span&gt;: &lt;span style=&#34;color:#b452cd&#34;&gt;30.744&lt;/span&gt; }&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;We have now written an F* program using an OCaml library.&lt;/p&gt;
+
+&lt;h2 id=&#34;limitations&#34;&gt;Limitations&lt;/h2&gt;
+
+&lt;p&gt;The approach described here works well if the F* types and the OCaml types line up well enough; by just using an interface file we are limited to using the same identifiers as the OCaml code.
+A more flexible approach is to write wrappers for the library in OCaml, to make the F* interface file easier to write.
+One example of an OCaml feature which I have not been able to write F* interface files for is polymorphic variants, like the following definition from &lt;code&gt;Yojson&lt;/code&gt;:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;type&lt;/span&gt; t = [
+    | `&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Null&lt;/span&gt;
+    | `&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Bool&lt;/span&gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;of&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;bool&lt;/span&gt;
+    | `&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Int&lt;/span&gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;of&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;int&lt;/span&gt;
+    | `&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Float&lt;/span&gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;of&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;float&lt;/span&gt;
+    | `&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;String&lt;/span&gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;of&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;string&lt;/span&gt;
+    | `&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Assoc&lt;/span&gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;of&lt;/span&gt; (&lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;string&lt;/span&gt; * t) &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;list&lt;/span&gt;
+    | `&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;List&lt;/span&gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;of&lt;/span&gt; t &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;list&lt;/span&gt;
+]&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;The problem is that identifiers in F* cannot start with the backtick character &lt;code&gt;`&lt;/code&gt;, which makes it difficult to write F* code which extracts to the necessary OCaml code.
+One way of resolving this would be to name the variants e.g. &lt;code&gt;Null&lt;/code&gt; or &lt;code&gt;Bool&lt;/code&gt; in the F* code, and have an additional processing step between extracting and compiling which replaces them by &lt;code&gt;`Null&lt;/code&gt; and &lt;code&gt;`Bool&lt;/code&gt;, which would be rather less elegant than writing wrapper code.
+If you know of any way of writing F* interface files for type definitions using polymorphic variants, please let me know!&lt;/p&gt;</description>
+    </item>
     
     <item>
       <title>Setting up an F* development environment</title>
