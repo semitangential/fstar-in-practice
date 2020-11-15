@@ -6,10 +6,19 @@
     <description>F* in Practice (Tags)</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-US</language>
-    <lastBuildDate>2020-08-30</lastBuildDate>
+    <lastBuildDate>2020-11-14</lastBuildDate>
     
     <atom:link href="/fstar-in-practice/tags/index.xml" rel="self" type="application/rss+xml" />
     
+    
+    <item>
+      <title>effects</title>
+      <link>/fstar-in-practice/tags/effects/</link>
+      <pubDate>2020-11-14</pubDate>
+      
+      <guid>/fstar-in-practice/tags/effects/</guid>
+      <description></description>
+    </item>
     
     <item>
       <title>ocaml</title>

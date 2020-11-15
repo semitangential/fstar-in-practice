@@ -350,23 +350,23 @@ The example we will run is <a href="./examples/Example.Executable.fst">the follo
 <div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-makefile" data-lang="makefile"><span style="color:#008b45">all</span>: out/ExampleExecutable
 
 <span style="color:#008b45">check</span>: Example.Executable.fst
-        ~/opt/fstar/bin/fstar.exe --use_hints --use_hint_hashes --record_hints --cache_checked_modules Example.Executable.fst
+	~/opt/fstar/bin/fstar.exe --use_hints --use_hint_hashes --record_hints --cache_checked_modules Example.Executable.fst
 
 <span style="color:#008b45">clean</span>:
-        rm -rf codegen/
-        rm -rf out/
+	rm -rf codegen/
+	rm -rf out/
 
 <span style="color:#008b45">codegen</span>:
-        mkdir codegen
+	mkdir codegen
 
 <span style="color:#008b45">out</span>:
-        mkdir out
+	mkdir out
 
 <span style="color:#008b45">ocaml</span>: codegen Example.Executable.fst
-        ~/opt/fstar/bin/fstar.exe --use_hints --use_hint_hashes --record_hints --cache_checked_modules --odir codegen --codegen OCaml --extract <span style="color:#cd5555">&#39;Example.Executable&#39;</span> Example.Executable.fst
+	~/opt/fstar/bin/fstar.exe --use_hints --use_hint_hashes --record_hints --cache_checked_modules --odir codegen --codegen OCaml --extract <span style="color:#cd5555">&#39;Example.Executable&#39;</span> Example.Executable.fst
 
 <span style="color:#008b45">out/ExampleExecutable</span>: ocaml out
-        <span style="color:#00688b">OCAMLPATH</span>=~/opt/fstar/bin/ opam <span style="color:#658b00">exec</span> -- ocamlfind opt -package fstarlib -linkpkg -g codegen/Example_Executable.ml -o out/ExampleExecutable
+	<span style="color:#00688b">OCAMLPATH</span>=~/opt/fstar/bin/ opam <span style="color:#658b00">exec</span> -- ocamlfind opt -package fstarlib -linkpkg -g codegen/Example_Executable.ml -o out/ExampleExecutable
 </code></pre></div>
 <p>The idea with this Makefile is to have something fairly minimal. For real projects it might be a good idea to include <code>ulib/ml/Makefile.include</code>.</p>
 

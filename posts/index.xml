@@ -6,10 +6,423 @@
     <description>F* in Practice (Posts)</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-US</language>
-    <lastBuildDate>2020-08-30</lastBuildDate>
+    <lastBuildDate>2020-11-14</lastBuildDate>
     
     <atom:link href="/fstar-in-practice/posts/index.xml" rel="self" type="application/rss+xml" />
     
+    
+    <item>
+      <title>Defining new effects</title>
+      <link>/fstar-in-practice/posts/defining-new-effects/</link>
+      <pubDate>2020-11-14</pubDate>
+      
+      <guid>/fstar-in-practice/posts/defining-new-effects/</guid>
+      <description>&lt;p&gt;Non-pure side-effects in F* are modelled through &lt;em&gt;computation types&lt;/em&gt;, also known as &lt;em&gt;effects&lt;/em&gt;.
+We take a look at how to define and use new custom effects to represent state in an external system.
+The example we use is a set of valves controlling the flow of water into and out of a water tank.&lt;/p&gt;
+
+&lt;p&gt;Examples from this post can be found &lt;a href=&#34;./examples/&#34;&gt;here&lt;/a&gt;.&lt;/p&gt;
+
+&lt;div class=&#34;ox-hugo-toc toc&#34;&gt;
+&lt;div&gt;&lt;/div&gt;
+
+&lt;div class=&#34;heading&#34;&gt;Table of Contents&lt;/div&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;#introduction&#34;&gt;Introduction&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;#modeling-the-state-of-the-valves&#34;&gt;Modeling the state of the valves&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;#defining-an-effect&#34;&gt;Defining an effect&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;#using-the-effect&#34;&gt;Using the effect&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;#some-lemmas&#34;&gt;Some lemmas&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;#proving-properties-of-stateful-functions-using-ghost-values&#34;&gt;Proving properties of stateful functions using ghost values&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;#completing-the-safe-water-tank-controller-interface&#34;&gt;Completing the safe water tank controller interface&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;#conclusion&#34;&gt;Conclusion&lt;/a&gt;&lt;/li&gt;
+&lt;li&gt;&lt;a href=&#34;#appendix&#34;&gt;Appendix&lt;/a&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;a href=&#34;#predicate-transformers-weakest-preconditions-and-effect-lifting&#34;&gt;Predicate transformers, weakest preconditions, and effect lifting&lt;/a&gt;&lt;/li&gt;
+&lt;/ul&gt;&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;&lt;/div&gt;
+&lt;!--endtoc--&gt;&lt;/p&gt;
+
+&lt;h2 id=&#34;introduction&#34;&gt;Introduction&lt;/h2&gt;
+
+&lt;p&gt;&lt;a id=&#34;orgde50cea&#34;&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;Suppose that we are writing software to control the flow into and out of a water tank.
+The tank has four valves, as shown in Figure &lt;a href=&#34;#org2fec3ea&#34;&gt;1&lt;/a&gt;.
+Each valve can be fully open, meaning water flows through it, or fully closed, which means that no water flows through it.&lt;/p&gt;
+
+&lt;p&gt;&lt;a id=&#34;org2fec3ea&#34;&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;figure&gt;
+    &lt;img src=&#34;figures/water-tank.png&#34;
+         alt=&#34;Figure 1: A water tank with one input valve and three output valves&#34;/&gt; &lt;figcaption&gt;
+            &lt;p&gt;Figure 1: A water tank with one input valve and three output valves&lt;/p&gt;
+        &lt;/figcaption&gt;
+&lt;/figure&gt;
+
+
+&lt;p&gt;To control the valves, we are given the following functions, which we assume are defined and implemented in an external library:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;code&gt;open_all&lt;/code&gt;, which opens all valves.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;close_all&lt;/code&gt;, which closes all valves.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;open_valve&lt;/code&gt;, which takes an integer and opens the corresponding valve.&lt;/li&gt;
+&lt;li&gt;&lt;code&gt;close_valve&lt;/code&gt;, which takes an integer and closes the corresponding valve.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;The input valve has index &lt;code&gt;0&lt;/code&gt;, while the output valves have indices &lt;code&gt;1&lt;/code&gt;, &lt;code&gt;2&lt;/code&gt;, and &lt;code&gt;3&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;Moreover, suppose that there are two constraints that arise from the physical environment:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;Mechanical constraint:&lt;/strong&gt; If the &lt;code&gt;open_valve&lt;/code&gt; function is called to open a valve which is already open, the mechanical parts involved in opening the valve will be damaged. Similarly, using &lt;code&gt;close_valve&lt;/code&gt; to close a valve which is already closed will also lead to mechanical damage. However, the &lt;code&gt;open_all&lt;/code&gt; and &lt;code&gt;close_all&lt;/code&gt; functions have no such restrictions; they are safe to call at any time.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;Overflow constraint:&lt;/strong&gt; The three output valves all have the same flow rate, but the input valve has a slightly larger flow rate. This means that if the input valve is open, then at least two output valves must be open to prevent the tank from overflowing.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;Note that these constraints are of different kinds: The mechanical constraint is a constraint on state transitions, but does not say anything about the valid states themselves, while the overflow constraint limits the set of valid states.&lt;/p&gt;
+
+&lt;p&gt;There are multiple ways of writing code which breaks these constraints by mistake.
+We will define an effect and give these functions types which ensure that the constraints are enforced by the type checker.&lt;/p&gt;
+
+&lt;h2 id=&#34;modeling-the-state-of-the-valves&#34;&gt;Modeling the state of the valves&lt;/h2&gt;
+
+&lt;p&gt;The state of the water tank system is completely determined if we know whether each of the four valves is open or closed.
+(We will not model the water level in the tank other than indirectly through the overflow constraint.)
+Conversely, every combination of open/closed states for the individual valves is a possible state for the entire system, even if some of the states will cause the tank to overflow.
+This means that the state of the system can be encoded as a list of four boolean values, where &lt;code&gt;true&lt;/code&gt; means the valve is open and &lt;code&gt;false&lt;/code&gt; means that the valve is closed.
+To make our code more readable we assign the name &lt;code&gt;num_output_valves&lt;/code&gt; to the number of output valves, which in our example is &lt;code&gt;3&lt;/code&gt;.
+We encode this in F* as follows:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; num_output_valves = 3
+
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; valve = x:&lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;int&lt;/span&gt;{x &amp;gt;= 0 /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; x &amp;lt;= num_output_valves}
+
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;type&lt;/span&gt; state = l:&lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;list&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;bool&lt;/span&gt;{length l = 1 + num_output_valves}&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;h2 id=&#34;defining-an-effect&#34;&gt;Defining an effect&lt;/h2&gt;
+
+&lt;p&gt;&lt;a id=&#34;orgf2e0c12&#34;&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;Having encoded the state of the system into a type, we now want to define an effect to use for typing the functions for controlling the water tank valves.
+We will define our effect in terms of the &lt;code&gt;STATE_h&lt;/code&gt; effect from &lt;code&gt;FStar.Pervasives&lt;/code&gt;, which will do most of the heavy lifting for us.
+Our effect definition looks like this:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;new_effect &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;TANK&lt;/span&gt; = &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;STATE_h&lt;/span&gt; state
+
+unfold &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; pure_lift (a:&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Type&lt;/span&gt;) (wp:pure_wp a) =
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; (p: a -&amp;gt; state -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Type&lt;/span&gt;) (x: state) -&amp;gt; wp (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; y -&amp;gt; p y x)
+sub_effect &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;PURE&lt;/span&gt; ~&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;TANK&lt;/span&gt; = pure_lift&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;The first line defines a new effect, called &lt;code&gt;TANK&lt;/code&gt;, which is the effect of functions which depend on or modify the state of our water tank system, which has state space &lt;code&gt;state&lt;/code&gt;.
+The last line defines an embedding of the &lt;code&gt;PURE&lt;/code&gt; effect into the effect &lt;code&gt;TANK&lt;/code&gt;.
+The reason this is important is that we want to be able to call pure functions from &lt;code&gt;TANK&lt;/code&gt; functions.
+The embedding is the function &lt;code&gt;pure_lift&lt;/code&gt;.
+We explain how it works in &lt;a href=&#34;#org56ece71&#34;&gt;the appendix&lt;/a&gt;, but for our current purposes it is fine to view this as a magic incantation.&lt;/p&gt;
+
+&lt;p&gt;To have an effect which is easier to work with, we define an effect which works with pre- and post-conditions, instead of the weakest precondition predicate transformers of the &lt;code&gt;TANK&lt;/code&gt; effect.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;effect &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Tank&lt;/span&gt; (a: &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Type&lt;/span&gt;)
+            (pre: (state -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Type&lt;/span&gt;))
+            (post: (state -&amp;gt; a -&amp;gt; state -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Type&lt;/span&gt;))
+  =
+  &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;TANK&lt;/span&gt; a (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; p vs0 -&amp;gt; pre vs0 /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt;
+            (forall x vs1 . pre vs0 /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; post vs0 x vs1 ==&amp;gt; p x vs1))&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;This allows us to write functions with types like &lt;code&gt;f: a -&amp;gt; Tank b pre post&lt;/code&gt;.
+Here, &lt;code&gt;pre&lt;/code&gt; is a precondition on the current state, which is required to hold before the function can be called, while &lt;code&gt;post&lt;/code&gt; is a postcondition on the initial state, return value, and final state of executing the function, which will need to be proved to hold for the type checker to accept the function.
+What the above code block is saying is that to prove that some property &lt;code&gt;p&lt;/code&gt; holds for the return value and final state of the function, it needs to be shown that the initial state &lt;code&gt;vs0&lt;/code&gt; satisfies the precondition &lt;code&gt;pre&lt;/code&gt;, and that the property &lt;code&gt;p&lt;/code&gt; follows from the precondition and postcondition of the function.
+Again, for the purposes of this post it is fine to not understand the details of this.&lt;/p&gt;
+
+&lt;h2 id=&#34;using-the-effect&#34;&gt;Using the effect&lt;/h2&gt;
+
+&lt;p&gt;We are now ready to give types to the functions &lt;code&gt;open_all&lt;/code&gt;, &lt;code&gt;close_all&lt;/code&gt;, &lt;code&gt;open_valve&lt;/code&gt;, and &lt;code&gt;close_valve&lt;/code&gt;, showing how they modify the state of the water tank.
+The types we will give them describe the effect they have on the water tank system, but will not take the &lt;a href=&#34;#orgde50cea&#34;&gt;overflow constraint&lt;/a&gt; into account.
+For this reason, we will use the names &lt;code&gt;open_all&#39;&lt;/code&gt;, &lt;code&gt;close_all&#39;&lt;/code&gt;, &lt;code&gt;open_valve&#39;&lt;/code&gt;, and &lt;code&gt;close_valve&#39;&lt;/code&gt; in this section, reserving the unprimed names for the final interface of the system.&lt;/p&gt;
+
+&lt;p&gt;We will assume that the actual implementations of the functions &lt;code&gt;open_all&#39;&lt;/code&gt;, &lt;code&gt;close_all&#39;&lt;/code&gt;, &lt;code&gt;open_valve&#39;&lt;/code&gt;, and &lt;code&gt;close_valve&#39;&lt;/code&gt; are contained in an external library, and that we only need to write an interface file giving them F* types.
+For more details about this approach to external libraries, see &lt;a href=&#34;../using-ocaml-libraries-in-fstar&#34;&gt;Using OCaml libraries in F*&lt;/a&gt;.&lt;/p&gt;
+
+&lt;p&gt;Let us start with &lt;code&gt;open_all&#39;&lt;/code&gt; and &lt;code&gt;close_all&#39;&lt;/code&gt;.
+After &lt;code&gt;open_all&#39;&lt;/code&gt; has run, all valves are open.
+In other words, the final state &lt;code&gt;vs&lt;/code&gt; satisfies &lt;code&gt;forall i. (index vs i) = true&lt;/code&gt;.
+Similarly, the state &lt;code&gt;vs&lt;/code&gt; after &lt;code&gt;close_all&#39;&lt;/code&gt; satisfies &lt;code&gt;forall i. (index vs i) = true&lt;/code&gt;.
+Hence we can give the functions the following types to capture their effect on the state of the water tank.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; open_all&amp;#39;:
+    &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;unit&lt;/span&gt; -&amp;gt;
+      &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Tank&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;unit&lt;/span&gt;
+        (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; _ -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;True&lt;/span&gt;)
+        (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; _ _ vs -&amp;gt; forall i. (index vs i) = true)
+
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; close_all&amp;#39;:
+    &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;unit&lt;/span&gt; -&amp;gt;
+      &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Tank&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;unit&lt;/span&gt;
+        (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; _ -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;True&lt;/span&gt;)
+        (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; _ _ vs -&amp;gt; forall i. (index vs i) = false)&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;The functions &lt;code&gt;open_valve&#39;&lt;/code&gt; and &lt;code&gt;close_valve&#39;&lt;/code&gt; are slightly more complicated.
+We know that after &lt;code&gt;open_valve&#39; i&lt;/code&gt; has been executed, the valve with index &lt;code&gt;i&lt;/code&gt; is open.
+This can be expressed as &lt;code&gt;index vs1 i = true&lt;/code&gt; where &lt;code&gt;vs1&lt;/code&gt; is the final state.
+Another important property of &lt;code&gt;open_valve&#39;&lt;/code&gt; is that it does not affect the state of any of the other valves, so that for all indices &lt;code&gt;j&lt;/code&gt; apart from &lt;code&gt;i&lt;/code&gt;, it holds that &lt;code&gt;index vs0 j = index vs1 j&lt;/code&gt;, where &lt;code&gt;vs0&lt;/code&gt; is the initial state.
+Finally, we can take this opportunity to encode the &lt;strong&gt;mechanical constraint&lt;/strong&gt;: It is only permissible to run &lt;code&gt;open_valve&#39; i&lt;/code&gt; when valve &lt;code&gt;i&lt;/code&gt; is not already open.
+These properties are expressed in the following type.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; open_valve&amp;#39;:
+    i: valve -&amp;gt;
+      &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Tank&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;unit&lt;/span&gt;
+        (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; vs -&amp;gt; index vs i = false)
+        (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; vs0 _ vs1 -&amp;gt; index vs1 i = true /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt;
+          (forall j. i = j &lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt;/ index vs0 j = index vs1 j))&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Similarly, &lt;code&gt;close_valve&#39; i&lt;/code&gt; can only be called when valve &lt;code&gt;i&lt;/code&gt; is open, and results in valve &lt;code&gt;i&lt;/code&gt; being closed while all other valves are unchanged.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; close_valve&amp;#39;:
+    i: valve -&amp;gt;
+      &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Tank&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;unit&lt;/span&gt;
+        (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; vs -&amp;gt; index vs i = true)
+        (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; vs0 _ vs1 -&amp;gt; index vs1 i = false /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt;
+          (forall j. i = j &lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt;/ index vs0 j = index vs1 j))&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;h2 id=&#34;some-lemmas&#34;&gt;Some lemmas&lt;/h2&gt;
+
+&lt;p&gt;In the next section we will need some lemmas, which are included here for completeness.
+To make the presentation less cluttered, we discuss them in this dedicated section.
+Feel free to skip this section if you are interested specifically in the code relating to state and effects.&lt;/p&gt;
+
+&lt;p&gt;&lt;details&gt;
+&lt;p class=&#34;details&#34;&gt;We begin by proving that if all values of a nonempty list are &lt;code&gt;a&lt;/code&gt;, then the number of elements equal to &lt;code&gt;a&lt;/code&gt; is the length of the list:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; counting_lemma: l:&lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;list&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;bool&lt;/span&gt; -&amp;gt; a:&lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;bool&lt;/span&gt; -&amp;gt;
+            &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Lemma&lt;/span&gt; (requires length l &amp;gt; 0 /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; (forall i. index l i = a))
+                  (ensures count a l = length l)
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;rec&lt;/span&gt; counting_lemma l a = &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;match&lt;/span&gt; l &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;with&lt;/span&gt;
+  | h :: [] -&amp;gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (index l 0 = a)
+  | h :: tl -&amp;gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (forall (i:nat{i+1 &amp;lt; length l}). index l (i+1) = index tl i);
+             &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (index l 0 = a);
+             &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (count a l = 1 + count a tl);
+             counting_lemma tl a&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Second, we prove that if two boolean lists &lt;code&gt;l1&lt;/code&gt; and &lt;code&gt;l2&lt;/code&gt; of equal length are such that for every &lt;code&gt;true&lt;/code&gt; element of &lt;code&gt;l1&lt;/code&gt; there is a &lt;code&gt;true&lt;/code&gt; element of &lt;code&gt;l2&lt;/code&gt; at the same index, then &lt;code&gt;l2&lt;/code&gt; has at least as many &lt;code&gt;true&lt;/code&gt; values as &lt;code&gt;l1&lt;/code&gt;.
+To get this proof to work, we need to make some observations about the relationship between indices in a list and in the tail of the list:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; increasing_count_lemma: l1: &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;list&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;bool&lt;/span&gt; -&amp;gt; l2: &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;list&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;bool&lt;/span&gt;{length l1 = length l2} -&amp;gt;
+              &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Lemma&lt;/span&gt; (requires forall j. (index l1 j = true) ==&amp;gt; (index l2 j = true))
+                    (ensures count true l2 &amp;gt;= count true l1)
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;rec&lt;/span&gt; increasing_count_lemma l1 l2 = &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;match&lt;/span&gt; l1, l2 &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;with&lt;/span&gt;
+  | h1 :: tl1, h2 :: tl2 -&amp;gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (h1 = index l1 0);
+                         &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (forall k. (index tl1 k = index l1 (k + 1)));
+                         &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (forall k. (index tl1 k = true) ==&amp;gt; (index tl2 k = true));
+                         increasing_count_lemma tl1 tl2;
+                         &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (count true l2 &amp;gt;= count true l1)
+  | [], [] -&amp;gt; ()&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Third, we prove that if two lists of equal length agree in each index, then the lists are equal:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; pointwise_list_equality_lemma: l1: &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;list&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;bool&lt;/span&gt; -&amp;gt; l2: &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;list&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;bool&lt;/span&gt;{length l1 = length l2} -&amp;gt;
+              &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Lemma&lt;/span&gt; (requires forall i. (index l1 i = index l2 i))
+                    (ensures l1 = l2)
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;rec&lt;/span&gt; pointwise_list_equality_lemma l1 l2 = &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;match&lt;/span&gt; l1, l2 &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;with&lt;/span&gt;
+  | [], [] -&amp;gt; ()
+  | h1 :: tl1, h2 :: tl2 -&amp;gt;
+    &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (index l1 0 = h1 /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; index l2 0 = h2);
+    &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (h1 = h2);
+
+    &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (forall j. (index tl1 j = index l2 (j+1)));
+    pointwise_list_equality_lemma tl1 tl2;
+    &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (tl1 = tl2)&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;Finally, we prove that if two boolean lists agree in every index except one, then the number of &lt;code&gt;true&lt;/code&gt; elements cannot differ by more than &lt;code&gt;1&lt;/code&gt; between the lists.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; decreasing_count_lemma: l1: &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;list&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;bool&lt;/span&gt; -&amp;gt; l2: &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;list&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;bool&lt;/span&gt;{length l1 = length l2} -&amp;gt; i:nat{i &amp;lt; length l1} -&amp;gt;
+                  &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Lemma&lt;/span&gt; (requires forall j. (i = j &lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt;/ index l1 j = index l2 j))
+                        (ensures count true l2 &amp;gt;= (count true l1) - 1)
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;rec&lt;/span&gt; decreasing_count_lemma l1 l2 i = &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;match&lt;/span&gt; l1, l2 &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;with&lt;/span&gt;
+  | h1 :: tl1, h2 :: tl2 -&amp;gt;
+    &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (forall j. (index tl1 j = index l1 (j+1)));
+    &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;match&lt;/span&gt; i &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;with&lt;/span&gt;
+      | 0 -&amp;gt;
+        &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (forall j. (index tl1 j = index tl2 j));
+        pointwise_list_equality_lemma tl1 tl2;
+        &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (tl1 = tl2);
+        &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (count true tl1 = count true tl2)
+      | _ -&amp;gt;
+        &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (h1 = index l1 0 /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; h2 = index l2 0);
+        &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (h1 = h2);
+        decreasing_count_lemma tl1 tl2 (i-1)&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;With these lemmas in place, we are ready to return to the water tank example.
+&lt;/p&gt;
+&lt;/details&gt;&lt;/p&gt;
+
+&lt;h2 id=&#34;proving-properties-of-stateful-functions-using-ghost-values&#34;&gt;Proving properties of stateful functions using ghost values&lt;/h2&gt;
+
+&lt;p&gt;Let us now consider the overflow constraint.
+It says that if the input valve, i.e. valve 0, is open then at least two of the other valves must also be open.
+We begin by writing a pure function &lt;code&gt;non_overflowing&lt;/code&gt; which determines if this property holds for some list:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; non_overflowing: state -&amp;gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;bool&lt;/span&gt;
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; non_overflowing vs = &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;match&lt;/span&gt; vs &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;with&lt;/span&gt;
+  vi :: vos -&amp;gt; (not vi) || count true vos &amp;gt;= 2&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;This function splits the state into the state of the input valve, &lt;code&gt;vi&lt;/code&gt;, and the states of the output valves, &lt;code&gt;vos&lt;/code&gt;.
+A state in which the water tank does not overflow is one where either the input valve is closed, i.e. &lt;code&gt;not vi&lt;/code&gt; holds, or where the number of open output valves, &lt;code&gt;count true vos&lt;/code&gt;, is at least two.&lt;/p&gt;
+
+&lt;p&gt;Our first goal is to prove that the result of calling &lt;code&gt;open_all&#39;&lt;/code&gt; is a state where the tank is not overflowing.
+The reason this holds is that if every valve is open, then the number of open output valves is equal to the total number of output valves, which is greater than or equal to the 2 required for not overflowing.
+This can be expressed in a pure lemma, using the &lt;code&gt;counting_lemma&lt;/code&gt; from the previous section, as follows.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; all_open_is_non_overflowing: vs: state -&amp;gt;
+                 &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Lemma&lt;/span&gt; (requires (forall i. (index vs i) = true))
+                       (ensures non_overflowing vs)
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; all_open_is_non_overflowing vs = &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;match&lt;/span&gt; vs &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;with&lt;/span&gt;
+  vi :: vos -&amp;gt;
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (forall (i:nat{i+1 &amp;lt; length vs}). index vs (i+1) = index vos i);
+  counting_lemma vos true;
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (count true vos = length vos);
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (non_overflowing vs)&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;We now need to prove that this lemma translates to a property of the stateful function &lt;code&gt;open_all&#39;&lt;/code&gt;.
+The crucial part in being able to do this is having access to the state of the water tank system in function definitions, in order to invoke the &lt;code&gt;all_open_is_non_overflowing&lt;/code&gt; lemma on the final state of &lt;code&gt;open_all&#39;&lt;/code&gt;.
+The type signature of a function reading the state is simple.
+It would look something like this: &lt;code&gt;unit -&amp;gt; Tank state (fun vs0 -&amp;gt; True) (fun vs0 x vs2 -&amp;gt; vs0 = x /\ vs0 = vs2)&lt;/code&gt;.
+However, we have no function in the water tank interface which allows us to read the state, so we cannot supply any implementation of this function.
+Since we only intend to use it in type signatures and proofs, which are erased when the code is extracted, this is not a problem in itself.
+However, having a function which crashes or behaves incorrectly at runtime if you use it in the wrong context is dangerous.
+Luckily, there is a way of resolving this using &lt;code&gt;FStar.Ghost&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;Before getting to &lt;code&gt;FStar.Ghost&lt;/code&gt;, let us briefly discuss the effect &lt;code&gt;GTot&lt;/code&gt;.
+Functions with the &lt;code&gt;GTot&lt;/code&gt; effect are total functions which can be used freely in type specifications, but not at all in function bodies.
+They represent functions which cannot actually be executed at runtime, but can be reasoned about at type checking time.
+As an example, consider the function &lt;code&gt;f&lt;/code&gt; defined as follows.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; f: nat -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;GTot&lt;/span&gt; nat
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; f n = n + 5&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;As promised, this function can be used to describe the types of other functions, so this definition of &lt;code&gt;g&lt;/code&gt; type checks:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; g: n:nat{f n &amp;lt; 10} -&amp;gt; k:nat{f k &amp;lt; 12}
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; g n = n + 2&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;However, trying to type check the following definition of &lt;code&gt;h&lt;/code&gt; gives the error &lt;code&gt;Computed type &amp;quot;nat&amp;quot; and effect &amp;quot;GTot&amp;quot; is not compatible with the annotated type &amp;quot;nat&amp;quot; effect &amp;quot;Tot&amp;quot;&lt;/code&gt;.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; h: nat -&amp;gt; nat
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; h n = f (n + 2)&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;The module &lt;code&gt;FStar.Ghost&lt;/code&gt; contains two important functions called &lt;code&gt;hide&lt;/code&gt; and &lt;code&gt;reveal&lt;/code&gt;, and a type called &lt;code&gt;erased&lt;/code&gt;.
+Their types and implementations are as follows:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;[@erasable]
+noeq
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;type&lt;/span&gt; erased (a:&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Type&lt;/span&gt;) =
+  | &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;E&lt;/span&gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;of&lt;/span&gt; a
+
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; hide: #a:&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Type&lt;/span&gt; u#a -&amp;gt; a -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Tot&lt;/span&gt; (erased a)
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; hide #a x = &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;E&lt;/span&gt; x
+
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; reveal : #a:&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Type&lt;/span&gt; u#a -&amp;gt; erased a -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;GTot&lt;/span&gt; a
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; reveal #a (&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;E&lt;/span&gt; x) = x&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;The &lt;code&gt;hide&lt;/code&gt; function takes any value, and wraps it in &lt;code&gt;erased&lt;/code&gt;, which in itself is not very exciting.
+However, the only way of getting the value back is by calling &lt;code&gt;reveal&lt;/code&gt; to unwrap it again.
+Since &lt;code&gt;reveal&lt;/code&gt; has effect &lt;code&gt;GTot&lt;/code&gt;, any value which has been hidden by &lt;code&gt;hide&lt;/code&gt; can only be used in type specifications.&lt;/p&gt;
+
+&lt;p&gt;We can use this fact to define a &lt;code&gt;get_tank_state&lt;/code&gt; function, which gives the current state of the water tank system.
+The fact that &lt;code&gt;get_tank_state ()&lt;/code&gt; is the current state of the system is encoded in the post-condition &lt;code&gt;vs0 = reveal x&lt;/code&gt;.
+Since the return value of &lt;code&gt;get_tank_state&lt;/code&gt; has type &lt;code&gt;erased state&lt;/code&gt;, which the compiler extracts to the type &lt;code&gt;unit&lt;/code&gt;, it cannot actually be used at runtime, so we do not need to specify an implementation of the function.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;assume &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; get_tank_state: &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;unit&lt;/span&gt; -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Tank&lt;/span&gt; (&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;FStar&lt;/span&gt;.&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;Ghost&lt;/span&gt;.erased state)
+                                (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; vs0 -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;True&lt;/span&gt;)
+                                (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; vs0 x vs1 -&amp;gt; vs0 = &lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;FStar&lt;/span&gt;.&lt;span style=&#34;color:#008b45;text-decoration:underline&#34;&gt;Ghost&lt;/span&gt;.reveal x /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; vs0 = vs1)&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;With this, we can define a function &lt;code&gt;open_all&lt;/code&gt; which does exactly what &lt;code&gt;open_all&#39;&lt;/code&gt; does, but additionally ensures that the resulting state of the water tank system is not overflowing.
+The only difference in the types of &lt;code&gt;open_all&#39;&lt;/code&gt; and &lt;code&gt;open_all&lt;/code&gt; is that we have now added the post-condition &lt;code&gt;non_overflowing vs1&lt;/code&gt;.
+We define &lt;code&gt;open_all&lt;/code&gt; by first calling &lt;code&gt;open_all&#39;&lt;/code&gt;, and then capturing the resulting state with &lt;code&gt;get_tank_state&lt;/code&gt; in order to pass it to the lemma &lt;code&gt;all_open_is_nonoverflowing&lt;/code&gt;.
+This is sufficient for the stronger post-condition to be accepted by the type checker.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; open_all: &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;unit&lt;/span&gt; -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Tank&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;unit&lt;/span&gt;
+                          (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; _ -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;True&lt;/span&gt;)
+                          (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; _ _ vs1 -&amp;gt; (non_overflowing vs1) /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt;
+                                       (forall i. (index vs1 i) = true))
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; open_all () = open_all&amp;#39; ();
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; vs = get_tank_state () &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;in&lt;/span&gt; (
+    all_open_is_non_overflowing vs;
+    &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (non_overflowing vs))&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;h2 id=&#34;completing-the-safe-water-tank-controller-interface&#34;&gt;Completing the safe water tank controller interface&lt;/h2&gt;
+
+&lt;p&gt;With the definition of &lt;code&gt;open_all&lt;/code&gt; in place, we can proceed similarly to give definitions of the other functions.
+The definition of &lt;code&gt;close_all&lt;/code&gt; is completely analogous to &lt;code&gt;open_all&lt;/code&gt;:
+We add the post-condition &lt;code&gt;non_overflowing vs1&lt;/code&gt;, and use &lt;code&gt;get_tank_state&lt;/code&gt; to be able to reason about the resulting state.
+In this case, to see that the tank is not overflowing it is sufficient to observe that the input valve is closed.&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; close_all: &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;unit&lt;/span&gt; -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Tank&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;unit&lt;/span&gt;
+                           (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; _ -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;True&lt;/span&gt;)
+                           (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; _ _ vs1 -&amp;gt; (non_overflowing vs1) /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt;
+                                        (forall i. (index vs1 i) = false))
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; close_all () = close_all&amp;#39; ();
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; vs = get_tank_state () &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;in&lt;/span&gt; (
+    &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (index vs 0 = false)
+  )&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;The definition of &lt;code&gt;open_valve&lt;/code&gt; is more interesting, since it cannot be called at any time without causing the water tank to overflow.
+In other words, it requires additional preconditions to ensure that the resulting state is non-overflowing.
+The necessary preconditions, and a proof that they are sufficient, are as follows:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; open_valve: i: valve -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Tank&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;unit&lt;/span&gt;
+            (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; vs -&amp;gt; non_overflowing vs
+                  /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; index vs i = false
+                  /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; (i &amp;gt; 0 &lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt;/ count true (tail vs) &amp;gt;= 2))
+            (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; vs0 _ vs1 -&amp;gt; non_overflowing vs1
+                  /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; index vs1 i = true
+                  /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; (forall j. i = j &lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt;/ index vs0 j = index vs1 j))
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; open_valve i =
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; vs1 = get_tank_state () &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;in&lt;/span&gt;
+  open_valve&amp;#39; i;
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; vs2 = get_tank_state () &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;in&lt;/span&gt;
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (i &amp;gt; 0 /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; index vs1 0 = false ==&amp;gt; index vs2 0 = false /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; non_overflowing vs2);
+
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (forall j. ((index vs1 j = true) ==&amp;gt; (index vs2 j = true)));
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (forall j. index (tail vs1) j = index vs1 (j+1));
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (forall j. ((index (tail vs1) j = true) ==&amp;gt; (index (tail vs2) j = true)));
+  increasing_count_lemma (tail vs1) (tail vs2)&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;p&gt;The only function which remains before we have a safe interface to the water tank controller is &lt;code&gt;close_valve&lt;/code&gt;.
+It&amp;rsquo;s definition is similar to the one for &lt;code&gt;open_valve&lt;/code&gt;:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;val&lt;/span&gt; close_valve: i: valve -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Tank&lt;/span&gt; &lt;span style=&#34;color:#00688b;font-weight:bold&#34;&gt;unit&lt;/span&gt;
+              (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; vs -&amp;gt; non_overflowing vs
+                    /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; index vs i = true
+                    /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; (i = 0 &lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt;/ count true (tail vs) &amp;gt;= 3))
+              (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; vs0 _ vs1 -&amp;gt; non_overflowing vs1
+                           /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; index vs1 i = false
+                           /&lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt; (forall j. i = j &lt;span style=&#34;color:#a61717;background-color:#e3d2d2&#34;&gt;\&lt;/span&gt;/ index vs0 j = index vs1 j))
+&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; close_valve i =
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; vs1 = get_tank_state () &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;in&lt;/span&gt;
+  close_valve&amp;#39; i;
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; vs2 = get_tank_state () &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;in&lt;/span&gt;
+  &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;match&lt;/span&gt; i &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;with&lt;/span&gt;
+    | 0 -&amp;gt; &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (non_overflowing vs1)
+    | _ -&amp;gt;
+      &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (forall j. (index (tail vs1) j = index vs1 (j+1)));
+      decreasing_count_lemma (tail vs1) (tail vs2) (i-1);
+      &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;assert&lt;/span&gt; (1 + count true (tail vs2) = count true (tail vs1))&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
+&lt;h2 id=&#34;conclusion&#34;&gt;Conclusion&lt;/h2&gt;
+
+&lt;p&gt;In this post, we started from a hypothetical external library containing functions for manipulating the state of an external system.
+Using the effect system in F*, we created a wrapper for the library which enforces certain correctness conditions at compile time.
+We did so by defining a custom state effect using &lt;code&gt;STATE_h&lt;/code&gt;.
+The implementation was conceptually split into two parts.
+The first part was to give the functions in the library types which faithfully model the effect they have on the external state, but which do not prevent the functions from being used incorrectly.
+The second part was to refine the types by adding preconditions which allow the type checker to verify that the functions are not called when it is not safe to do so.&lt;/p&gt;
+
+&lt;h2 id=&#34;appendix&#34;&gt;Appendix&lt;/h2&gt;
+
+&lt;h3 id=&#34;predicate-transformers-weakest-preconditions-and-effect-lifting&#34;&gt;Predicate transformers, weakest preconditions, and effect lifting&lt;/h3&gt;
+
+&lt;p&gt;&lt;a id=&#34;org56ece71&#34;&gt;&lt;/a&gt;&lt;/p&gt;
+
+&lt;p&gt;This appendix explains the definition of the function &lt;code&gt;pure_lift&lt;/code&gt; from the section &amp;ldquo;Defining an effect&amp;rdquo;.
+The explanation here is intended to be true in spirit, but not in detail; it has been simplified, and is not true if taken literally.
+In particular, the types we give for predicates here have codomain &lt;code&gt;bool&lt;/code&gt;, rather than the more correct &lt;code&gt;Type&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;This topic is also explained in the section &amp;ldquo;&lt;em&gt;9. Specifying effects&lt;/em&gt;&amp;rdquo; (in particular in sections &amp;ldquo;&lt;em&gt;9.1. Background: Generating compact verification conditions&lt;/em&gt;&amp;rdquo;, &amp;ldquo;&lt;em&gt;9.3. The &lt;code&gt;PURE&lt;/code&gt; effect&lt;/em&gt;&amp;rdquo;, and &amp;ldquo;&lt;em&gt;9.5. Lifting effects&lt;/em&gt;&amp;rdquo;) in the &lt;a href=&#34;https://fstar-lang.org/tutorial/tutorial.html#sec-specifying-effects&#34;&gt;F* tutorial&lt;/a&gt;.
+However, that section is not easy to absorb on a first read-through, so I would recommend reading, in parallel with Section 9 of the tutorial, the following papers which, while significantly longer and deeper, provide more context:&lt;/p&gt;
+
+&lt;ul&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href=&#34;https://www.fstar-lang.org/papers/dm4free/&#34;&gt;Dijkstra Monads for Free&lt;/a&gt;&lt;/strong&gt; &lt;em&gt;(Danel Ahman, Catalin Hritcu, Kenji Maillard, Guido Martínez, Gordon Plotkin, Jonathan Protzenko, Aseem Rastogi, Nikhil Swamy)&lt;/em&gt;, In 44th ACM SIGPLAN Symposium on Principles of Programming Languages (POPL), ACM, 2017.&lt;/li&gt;
+&lt;li&gt;&lt;strong&gt;&lt;a href=&#34;https://www.microsoft.com/en-us/research/publication/verifying-higher-order-programs-with-the-dijkstra-monad/&#34;&gt;Verifying Higher-order Programs with the Dijkstra Monad&lt;/a&gt;&lt;/strong&gt; &lt;em&gt;(Nikhil Swamy, Joel Weinberger, Cole Schlesinger, Juan Chen, Benjamin Livshits)&lt;/em&gt;, In Proceedings of the 34th annual ACM SIGPLAN conference on Programming Language Design and Implementation, 2013.&lt;/li&gt;
+&lt;/ul&gt;
+
+&lt;p&gt;Suppose that we have some function &lt;code&gt;f: b -&amp;gt; Tot a&lt;/code&gt;, and some property &lt;code&gt;p: a -&amp;gt; bool&lt;/code&gt;, and that we want to prove that the return value of &lt;code&gt;f&lt;/code&gt; always satisfies the property &lt;code&gt;p&lt;/code&gt;.
+What do we need to prove to ensure that this is the case?
+What we need to prove depends on the function &lt;code&gt;f&lt;/code&gt;; if &lt;code&gt;f&lt;/code&gt; is a constant function which always return the same value &lt;code&gt;y&lt;/code&gt;, then we only need to prove that &lt;code&gt;p y&lt;/code&gt; is true, but in general we would need to prove something more involved.
+When we define the function &lt;code&gt;f&lt;/code&gt;, F* automatically computes something called a &amp;ldquo;predicate transformer&amp;rdquo; corresponding to &lt;code&gt;f&lt;/code&gt;.
+This predicate transformer, which we will denote &lt;code&gt;wp&lt;/code&gt;, takes any predicate &lt;code&gt;a -&amp;gt; bool&lt;/code&gt;, for instance &lt;code&gt;p&lt;/code&gt;, and computes what needs to be proved to ensure that the return value of &lt;code&gt;f&lt;/code&gt; always satisfies &lt;code&gt;p&lt;/code&gt;.
+All such predicate transformers for pure functions have the type &lt;code&gt;pure_wp&lt;/code&gt;, which is defined in &lt;code&gt;ulib/prims.fst&lt;/code&gt; in the F* standard library.&lt;/p&gt;
+
+&lt;p&gt;Consider now the analog of this for functions with the &lt;code&gt;TANK&lt;/code&gt; effect, which can modify some state of type &lt;code&gt;state&lt;/code&gt;.
+The properties we would like to prove about the return type of some &lt;code&gt;TANK&lt;/code&gt; function have the form &lt;code&gt;p: a -&amp;gt; state -&amp;gt; bool&lt;/code&gt; rather than just &lt;code&gt;p: a -&amp;gt; bool&lt;/code&gt; as for pure functions, since we are interested in proving things about both the return value (which has type &lt;code&gt;a&lt;/code&gt;), and the resulting state after the function has been executed (which has type &lt;code&gt;state&lt;/code&gt;).
+In addition, what needs to be proved to ensure that some property &lt;code&gt;p&lt;/code&gt; holds for the resulting state and return value depends on the state before the function has been run.
+Taking all this together, the analog of &lt;code&gt;wp&lt;/code&gt; (corresponding to the pure function &lt;code&gt;f&lt;/code&gt; above) for a function &lt;code&gt;g&lt;/code&gt; with the &lt;code&gt;TANK&lt;/code&gt; effect would be something which takes as arguments a property &lt;code&gt;p: a -&amp;gt; state -&amp;gt; bool&lt;/code&gt; and an initial state &lt;code&gt;x: state&lt;/code&gt;, and computes what needs to be proved in order for the property &lt;code&gt;p&lt;/code&gt; to hold for the resulting state and return value of &lt;code&gt;g&lt;/code&gt;.&lt;/p&gt;
+
+&lt;p&gt;We are now in a position to explain what &lt;code&gt;pure_lift&lt;/code&gt; is doing in the section &lt;a href=&#34;#orgf2e0c12&#34;&gt;Defining an effect&lt;/a&gt;.
+It takes as an argument &lt;code&gt;wp&lt;/code&gt;, which is the predicate transformer corresponding to some pure function &lt;code&gt;f&lt;/code&gt;.
+It then produces a predicate transformer for the same function &lt;code&gt;f&lt;/code&gt;, but viewed as a &lt;code&gt;TANK&lt;/code&gt; function rather than a &lt;code&gt;PURE&lt;/code&gt; function.
+This new predicate transformer takes a property &lt;code&gt;p: a -&amp;gt; state -&amp;gt; bool&lt;/code&gt;, which we would like to prove holds for the resulting state and return value of &lt;code&gt;f&lt;/code&gt;, together with the initial state &lt;code&gt;x: state&lt;/code&gt; which is the state before running &lt;code&gt;f&lt;/code&gt;.
+To prove that the property &lt;code&gt;p&lt;/code&gt; holds after the function &lt;code&gt;f&lt;/code&gt; has been executed, what do we need to prove?
+If we denote the return value of &lt;code&gt;f&lt;/code&gt; by &lt;code&gt;y&lt;/code&gt;, and the resulting state by &lt;code&gt;x1&lt;/code&gt;, then what we want to prove is &lt;code&gt;p y x1&lt;/code&gt;.
+However, &lt;code&gt;f&lt;/code&gt; is a pure function, so &lt;code&gt;x1 = x&lt;/code&gt;.
+This means that we want to prove &lt;code&gt;p y x&lt;/code&gt;, where &lt;code&gt;y&lt;/code&gt; is the return value of &lt;code&gt;f&lt;/code&gt;.
+Hence the property we want to prove after observing that &lt;code&gt;x1 = x&lt;/code&gt; is &lt;code&gt;fun y -&amp;gt; p y x&lt;/code&gt;, which has the type &lt;code&gt;a -&amp;gt; bool&lt;/code&gt;.
+This is now a property which does not depend on the resulting state of &lt;code&gt;f&lt;/code&gt;, and hence can be considered a property of the pure function &lt;code&gt;f&lt;/code&gt; (albeit parameterized by an initial state &lt;code&gt;x&lt;/code&gt;).
+At our disposal we have &lt;code&gt;wp&lt;/code&gt;, which tells us what needs to be proved to ensure that some property holds for &lt;code&gt;f&lt;/code&gt; viewed as a pure function.
+We can plug the property &lt;code&gt;fun y -&amp;gt; p y x&lt;/code&gt; into &lt;code&gt;wp&lt;/code&gt;, and that will tell us what needs to be proved in order to guarantee that &lt;code&gt;p&lt;/code&gt; holds.
+We have then arrived at the definition of &lt;code&gt;pure_lift&lt;/code&gt;:&lt;/p&gt;
+&lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-ocaml&#34; data-lang=&#34;ocaml&#34;&gt;unfold &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;let&lt;/span&gt; pure_lift (a:&lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Type&lt;/span&gt;) (wp:pure_wp a) = &lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; (p: a -&amp;gt; state -&amp;gt; &lt;span style=&#34;color:#008b45;font-weight:bold&#34;&gt;Type&lt;/span&gt;) (x: state) -&amp;gt; wp (&lt;span style=&#34;color:#8b008b;font-weight:bold&#34;&gt;fun&lt;/span&gt; y -&amp;gt; p y x)&lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;</description>
+    </item>
     
     <item>
       <title>Using OCaml libraries in F*</title>
@@ -421,23 +834,23 @@ The example we will run is &lt;a href=&#34;./examples/Example.Executable.fst&#34
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-makefile&#34; data-lang=&#34;makefile&#34;&gt;&lt;span style=&#34;color:#008b45&#34;&gt;all&lt;/span&gt;: out/ExampleExecutable
 
 &lt;span style=&#34;color:#008b45&#34;&gt;check&lt;/span&gt;: Example.Executable.fst
-        ~/opt/fstar/bin/fstar.exe --use_hints --use_hint_hashes --record_hints --cache_checked_modules Example.Executable.fst
+	~/opt/fstar/bin/fstar.exe --use_hints --use_hint_hashes --record_hints --cache_checked_modules Example.Executable.fst
 
 &lt;span style=&#34;color:#008b45&#34;&gt;clean&lt;/span&gt;:
-        rm -rf codegen/
-        rm -rf out/
+	rm -rf codegen/
+	rm -rf out/
 
 &lt;span style=&#34;color:#008b45&#34;&gt;codegen&lt;/span&gt;:
-        mkdir codegen
+	mkdir codegen
 
 &lt;span style=&#34;color:#008b45&#34;&gt;out&lt;/span&gt;:
-        mkdir out
+	mkdir out
 
 &lt;span style=&#34;color:#008b45&#34;&gt;ocaml&lt;/span&gt;: codegen Example.Executable.fst
-        ~/opt/fstar/bin/fstar.exe --use_hints --use_hint_hashes --record_hints --cache_checked_modules --odir codegen --codegen OCaml --extract &lt;span style=&#34;color:#cd5555&#34;&gt;&amp;#39;Example.Executable&amp;#39;&lt;/span&gt; Example.Executable.fst
+	~/opt/fstar/bin/fstar.exe --use_hints --use_hint_hashes --record_hints --cache_checked_modules --odir codegen --codegen OCaml --extract &lt;span style=&#34;color:#cd5555&#34;&gt;&amp;#39;Example.Executable&amp;#39;&lt;/span&gt; Example.Executable.fst
 
 &lt;span style=&#34;color:#008b45&#34;&gt;out/ExampleExecutable&lt;/span&gt;: ocaml out
-        &lt;span style=&#34;color:#00688b&#34;&gt;OCAMLPATH&lt;/span&gt;=~/opt/fstar/bin/ opam &lt;span style=&#34;color:#658b00&#34;&gt;exec&lt;/span&gt; -- ocamlfind opt -package fstarlib -linkpkg -g codegen/Example_Executable.ml -o out/ExampleExecutable
+	&lt;span style=&#34;color:#00688b&#34;&gt;OCAMLPATH&lt;/span&gt;=~/opt/fstar/bin/ opam &lt;span style=&#34;color:#658b00&#34;&gt;exec&lt;/span&gt; -- ocamlfind opt -package fstarlib -linkpkg -g codegen/Example_Executable.ml -o out/ExampleExecutable
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;The idea with this Makefile is to have something fairly minimal. For real projects it might be a good idea to include &lt;code&gt;ulib/ml/Makefile.include&lt;/code&gt;.&lt;/p&gt;
 

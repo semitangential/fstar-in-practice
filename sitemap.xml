@@ -9,12 +9,37 @@
   
   <url>
     <loc>/fstar-in-practice/categories/</loc>
-    <lastmod>2020-08-30</lastmod>
+    <lastmod>2020-11-14</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/posts/defining-new-effects/</loc>
+    <lastmod>2020-11-14</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/tags/effects/</loc>
+    <lastmod>2020-11-14</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/categories/effects/</loc>
+    <lastmod>2020-11-14</lastmod>
   </url>
   
   <url>
     <loc>/fstar-in-practice/</loc>
-    <lastmod>2020-08-30</lastmod>
+    <lastmod>2020-11-14</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/posts/</loc>
+    <lastmod>2020-11-14</lastmod>
+  </url>
+  
+  <url>
+    <loc>/fstar-in-practice/tags/</loc>
+    <lastmod>2020-11-14</lastmod>
   </url>
   
   <url>
@@ -24,16 +49,6 @@
   
   <url>
     <loc>/fstar-in-practice/tags/ocaml/</loc>
-    <lastmod>2020-08-30</lastmod>
-  </url>
-  
-  <url>
-    <loc>/fstar-in-practice/posts/</loc>
-    <lastmod>2020-08-30</lastmod>
-  </url>
-  
-  <url>
-    <loc>/fstar-in-practice/tags/</loc>
     <lastmod>2020-08-30</lastmod>
   </url>
   
@@ -48,12 +63,12 @@
   </url>
   
   <url>
-    <loc>/fstar-in-practice/categories/setup/</loc>
+    <loc>/fstar-in-practice/tags/setup/</loc>
     <lastmod>2020-08-22</lastmod>
   </url>
   
   <url>
-    <loc>/fstar-in-practice/tags/setup/</loc>
+    <loc>/fstar-in-practice/categories/setup/</loc>
     <lastmod>2020-08-22</lastmod>
   </url>
   

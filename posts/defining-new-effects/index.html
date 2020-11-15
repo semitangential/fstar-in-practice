@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html>
+<head>
+    
+        
+<meta charset="utf-8">
+<meta name="HandheldFriendly" content="True">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="referrer" content="no-referrer-when-downgrade">
+
+<title>Defining new effects  - F* in Practice</title>
+<meta name="description" content="Using F* for software development">
+
+<link rel="alternate" type="application/rss+xml" title="RSS" href="/fstar-in-practice/rss/">
+
+<link rel="icon" type="image/x-icon" href="/fstar-in-practice/favicon.ico">
+<link rel="apple-touch-icon-precomposed" href="/fstar-in-practice/favicon.png">
+
+<link rel="stylesheet" href="/fstar-in-practice/css/style.css" />
+
+
+    
+</head>
+<body>
+    <div class="container">
+        <header> 
+            
+                <h1 class="site-header">
+    <a href="/fstar-in-practice/">F* in Practice</a>
+</h1>
+<nav>
+    
+    
+    <a class="" href="/fstar-in-practice/pages/about/" title="">About</a>
+    
+    <a class="" href="/fstar-in-practice/tags/" title="">Tags</a>
+    
+    <a class="" href="/fstar-in-practice/series/" title="">Series</a>
+    
+    <a class="" href="/fstar-in-practice/categories/" title="">Categories</a>
+    
+    <a class="" href="/fstar-in-practice/posts/" title="">Archive</a>
+    
+</nav>
+
+            
+        </header>
+        <main>
+            
+
+    <article class="post">
+        <header>
+            <h1>Defining new effects</h1>
+        </header>
+        <div class="content">
+            <p>Non-pure side-effects in F* are modelled through <em>computation types</em>, also known as <em>effects</em>.
+We take a look at how to define and use new custom effects to represent state in an external system.
+The example we use is a set of valves controlling the flow of water into and out of a water tank.</p>
+
+<p>Examples from this post can be found <a href="./examples/">here</a>.</p>
+
+<div class="ox-hugo-toc toc">
+<div></div>
+
+<div class="heading">Table of Contents</div>
+
+<ul>
+<li><a href="#introduction">Introduction</a></li>
+<li><a href="#modeling-the-state-of-the-valves">Modeling the state of the valves</a></li>
+<li><a href="#defining-an-effect">Defining an effect</a></li>
+<li><a href="#using-the-effect">Using the effect</a></li>
+<li><a href="#some-lemmas">Some lemmas</a></li>
+<li><a href="#proving-properties-of-stateful-functions-using-ghost-values">Proving properties of stateful functions using ghost values</a></li>
+<li><a href="#completing-the-safe-water-tank-controller-interface">Completing the safe water tank controller interface</a></li>
+<li><a href="#conclusion">Conclusion</a></li>
+<li><a href="#appendix">Appendix</a>
+
+<ul>
+<li><a href="#predicate-transformers-weakest-preconditions-and-effect-lifting">Predicate transformers, weakest preconditions, and effect lifting</a></li>
+</ul></li>
+</ul>
+
+<p></div>
+<!--endtoc--></p>
+
+<h2 id="introduction">Introduction</h2>
+
+<p><a id="orgde50cea"></a></p>
+
+<p>Suppose that we are writing software to control the flow into and out of a water tank.
+The tank has four valves, as shown in Figure <a href="#org2fec3ea">1</a>.
+Each valve can be fully open, meaning water flows through it, or fully closed, which means that no water flows through it.</p>
+
+<p><a id="org2fec3ea"></a></p>
+
+<figure>
+    <img src="figures/water-tank.png"
+         alt="Figure 1: A water tank with one input valve and three output valves"/> <figcaption>
+            <p>Figure 1: A water tank with one input valve and three output valves</p>
+        </figcaption>
+</figure>
+
+
+<p>To control the valves, we are given the following functions, which we assume are defined and implemented in an external library:</p>
+
+<ul>
+<li><code>open_all</code>, which opens all valves.</li>
+<li><code>close_all</code>, which closes all valves.</li>
+<li><code>open_valve</code>, which takes an integer and opens the corresponding valve.</li>
+<li><code>close_valve</code>, which takes an integer and closes the corresponding valve.</li>
+</ul>
+
+<p>The input valve has index <code>0</code>, while the output valves have indices <code>1</code>, <code>2</code>, and <code>3</code>.</p>
+
+<p>Moreover, suppose that there are two constraints that arise from the physical environment:</p>
+
+<ul>
+<li><strong>Mechanical constraint:</strong> If the <code>open_valve</code> function is called to open a valve which is already open, the mechanical parts involved in opening the valve will be damaged. Similarly, using <code>close_valve</code> to close a valve which is already closed will also lead to mechanical damage. However, the <code>open_all</code> and <code>close_all</code> functions have no such restrictions; they are safe to call at any time.</li>
+<li><strong>Overflow constraint:</strong> The three output valves all have the same flow rate, but the input valve has a slightly larger flow rate. This means that if the input valve is open, then at least two output valves must be open to prevent the tank from overflowing.</li>
+</ul>
+
+<p>Note that these constraints are of different kinds: The mechanical constraint is a constraint on state transitions, but does not say anything about the valid states themselves, while the overflow constraint limits the set of valid states.</p>
+
+<p>There are multiple ways of writing code which breaks these constraints by mistake.
+We will define an effect and give these functions types which ensure that the constraints are enforced by the type checker.</p>
+
+<h2 id="modeling-the-state-of-the-valves">Modeling the state of the valves</h2>
+
+<p>The state of the water tank system is completely determined if we know whether each of the four valves is open or closed.
+(We will not model the water level in the tank other than indirectly through the overflow constraint.)
+Conversely, every combination of open/closed states for the individual valves is a possible state for the entire system, even if some of the states will cause the tank to overflow.
+This means that the state of the system can be encoded as a list of four boolean values, where <code>true</code> means the valve is open and <code>false</code> means that the valve is closed.
+To make our code more readable we assign the name <code>num_output_valves</code> to the number of output valves, which in our example is <code>3</code>.
+We encode this in F* as follows:</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">let</span> num_output_valves = 3
+
+<span style="color:#8b008b;font-weight:bold">let</span> valve = x:<span style="color:#00688b;font-weight:bold">int</span>{x &gt;= 0 /<span style="color:#a61717;background-color:#e3d2d2">\</span> x &lt;= num_output_valves}
+
+<span style="color:#8b008b;font-weight:bold">type</span> state = l:<span style="color:#00688b;font-weight:bold">list</span> <span style="color:#00688b;font-weight:bold">bool</span>{length l = 1 + num_output_valves}</code></pre></div>
+<h2 id="defining-an-effect">Defining an effect</h2>
+
+<p><a id="orgf2e0c12"></a></p>
+
+<p>Having encoded the state of the system into a type, we now want to define an effect to use for typing the functions for controlling the water tank valves.
+We will define our effect in terms of the <code>STATE_h</code> effect from <code>FStar.Pervasives</code>, which will do most of the heavy lifting for us.
+Our effect definition looks like this:</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml">new_effect <span style="color:#008b45;font-weight:bold">TANK</span> = <span style="color:#008b45;font-weight:bold">STATE_h</span> state
+
+unfold <span style="color:#8b008b;font-weight:bold">let</span> pure_lift (a:<span style="color:#008b45;font-weight:bold">Type</span>) (wp:pure_wp a) =
+  <span style="color:#8b008b;font-weight:bold">fun</span> (p: a -&gt; state -&gt; <span style="color:#008b45;font-weight:bold">Type</span>) (x: state) -&gt; wp (<span style="color:#8b008b;font-weight:bold">fun</span> y -&gt; p y x)
+sub_effect <span style="color:#008b45;font-weight:bold">PURE</span> ~&gt; <span style="color:#008b45;font-weight:bold">TANK</span> = pure_lift</code></pre></div>
+<p>The first line defines a new effect, called <code>TANK</code>, which is the effect of functions which depend on or modify the state of our water tank system, which has state space <code>state</code>.
+The last line defines an embedding of the <code>PURE</code> effect into the effect <code>TANK</code>.
+The reason this is important is that we want to be able to call pure functions from <code>TANK</code> functions.
+The embedding is the function <code>pure_lift</code>.
+We explain how it works in <a href="#org56ece71">the appendix</a>, but for our current purposes it is fine to view this as a magic incantation.</p>
+
+<p>To have an effect which is easier to work with, we define an effect which works with pre- and post-conditions, instead of the weakest precondition predicate transformers of the <code>TANK</code> effect.</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml">effect <span style="color:#008b45;font-weight:bold">Tank</span> (a: <span style="color:#008b45;font-weight:bold">Type</span>)
+            (pre: (state -&gt; <span style="color:#008b45;font-weight:bold">Type</span>))
+            (post: (state -&gt; a -&gt; state -&gt; <span style="color:#008b45;font-weight:bold">Type</span>))
+  =
+  <span style="color:#008b45;font-weight:bold">TANK</span> a (<span style="color:#8b008b;font-weight:bold">fun</span> p vs0 -&gt; pre vs0 /<span style="color:#a61717;background-color:#e3d2d2">\</span>
+            (forall x vs1 . pre vs0 /<span style="color:#a61717;background-color:#e3d2d2">\</span> post vs0 x vs1 ==&gt; p x vs1))</code></pre></div>
+<p>This allows us to write functions with types like <code>f: a -&gt; Tank b pre post</code>.
+Here, <code>pre</code> is a precondition on the current state, which is required to hold before the function can be called, while <code>post</code> is a postcondition on the initial state, return value, and final state of executing the function, which will need to be proved to hold for the type checker to accept the function.
+What the above code block is saying is that to prove that some property <code>p</code> holds for the return value and final state of the function, it needs to be shown that the initial state <code>vs0</code> satisfies the precondition <code>pre</code>, and that the property <code>p</code> follows from the precondition and postcondition of the function.
+Again, for the purposes of this post it is fine to not understand the details of this.</p>
+
+<h2 id="using-the-effect">Using the effect</h2>
+
+<p>We are now ready to give types to the functions <code>open_all</code>, <code>close_all</code>, <code>open_valve</code>, and <code>close_valve</code>, showing how they modify the state of the water tank.
+The types we will give them describe the effect they have on the water tank system, but will not take the <a href="#orgde50cea">overflow constraint</a> into account.
+For this reason, we will use the names <code>open_all'</code>, <code>close_all'</code>, <code>open_valve'</code>, and <code>close_valve'</code> in this section, reserving the unprimed names for the final interface of the system.</p>
+
+<p>We will assume that the actual implementations of the functions <code>open_all'</code>, <code>close_all'</code>, <code>open_valve'</code>, and <code>close_valve'</code> are contained in an external library, and that we only need to write an interface file giving them F* types.
+For more details about this approach to external libraries, see <a href="../using-ocaml-libraries-in-fstar">Using OCaml libraries in F*</a>.</p>
+
+<p>Let us start with <code>open_all'</code> and <code>close_all'</code>.
+After <code>open_all'</code> has run, all valves are open.
+In other words, the final state <code>vs</code> satisfies <code>forall i. (index vs i) = true</code>.
+Similarly, the state <code>vs</code> after <code>close_all'</code> satisfies <code>forall i. (index vs i) = true</code>.
+Hence we can give the functions the following types to capture their effect on the state of the water tank.</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> open_all&#39;:
+    <span style="color:#00688b;font-weight:bold">unit</span> -&gt;
+      <span style="color:#008b45;font-weight:bold">Tank</span> <span style="color:#00688b;font-weight:bold">unit</span>
+        (<span style="color:#8b008b;font-weight:bold">fun</span> _ -&gt; <span style="color:#008b45;font-weight:bold">True</span>)
+        (<span style="color:#8b008b;font-weight:bold">fun</span> _ _ vs -&gt; forall i. (index vs i) = true)
+
+<span style="color:#8b008b;font-weight:bold">val</span> close_all&#39;:
+    <span style="color:#00688b;font-weight:bold">unit</span> -&gt;
+      <span style="color:#008b45;font-weight:bold">Tank</span> <span style="color:#00688b;font-weight:bold">unit</span>
+        (<span style="color:#8b008b;font-weight:bold">fun</span> _ -&gt; <span style="color:#008b45;font-weight:bold">True</span>)
+        (<span style="color:#8b008b;font-weight:bold">fun</span> _ _ vs -&gt; forall i. (index vs i) = false)</code></pre></div>
+<p>The functions <code>open_valve'</code> and <code>close_valve'</code> are slightly more complicated.
+We know that after <code>open_valve' i</code> has been executed, the valve with index <code>i</code> is open.
+This can be expressed as <code>index vs1 i = true</code> where <code>vs1</code> is the final state.
+Another important property of <code>open_valve'</code> is that it does not affect the state of any of the other valves, so that for all indices <code>j</code> apart from <code>i</code>, it holds that <code>index vs0 j = index vs1 j</code>, where <code>vs0</code> is the initial state.
+Finally, we can take this opportunity to encode the <strong>mechanical constraint</strong>: It is only permissible to run <code>open_valve' i</code> when valve <code>i</code> is not already open.
+These properties are expressed in the following type.</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> open_valve&#39;:
+    i: valve -&gt;
+      <span style="color:#008b45;font-weight:bold">Tank</span> <span style="color:#00688b;font-weight:bold">unit</span>
+        (<span style="color:#8b008b;font-weight:bold">fun</span> vs -&gt; index vs i = false)
+        (<span style="color:#8b008b;font-weight:bold">fun</span> vs0 _ vs1 -&gt; index vs1 i = true /<span style="color:#a61717;background-color:#e3d2d2">\</span>
+          (forall j. i = j <span style="color:#a61717;background-color:#e3d2d2">\</span>/ index vs0 j = index vs1 j))</code></pre></div>
+<p>Similarly, <code>close_valve' i</code> can only be called when valve <code>i</code> is open, and results in valve <code>i</code> being closed while all other valves are unchanged.</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> close_valve&#39;:
+    i: valve -&gt;
+      <span style="color:#008b45;font-weight:bold">Tank</span> <span style="color:#00688b;font-weight:bold">unit</span>
+        (<span style="color:#8b008b;font-weight:bold">fun</span> vs -&gt; index vs i = true)
+        (<span style="color:#8b008b;font-weight:bold">fun</span> vs0 _ vs1 -&gt; index vs1 i = false /<span style="color:#a61717;background-color:#e3d2d2">\</span>
+          (forall j. i = j <span style="color:#a61717;background-color:#e3d2d2">\</span>/ index vs0 j = index vs1 j))</code></pre></div>
+<h2 id="some-lemmas">Some lemmas</h2>
+
+<p>In the next section we will need some lemmas, which are included here for completeness.
+To make the presentation less cluttered, we discuss them in this dedicated section.
+Feel free to skip this section if you are interested specifically in the code relating to state and effects.</p>
+
+<p><details>
+<p class="details">We begin by proving that if all values of a nonempty list are <code>a</code>, then the number of elements equal to <code>a</code> is the length of the list:</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> counting_lemma: l:<span style="color:#00688b;font-weight:bold">list</span> <span style="color:#00688b;font-weight:bold">bool</span> -&gt; a:<span style="color:#00688b;font-weight:bold">bool</span> -&gt;
+            <span style="color:#008b45;font-weight:bold">Lemma</span> (requires length l &gt; 0 /<span style="color:#a61717;background-color:#e3d2d2">\</span> (forall i. index l i = a))
+                  (ensures count a l = length l)
+<span style="color:#8b008b;font-weight:bold">let</span> <span style="color:#8b008b;font-weight:bold">rec</span> counting_lemma l a = <span style="color:#8b008b;font-weight:bold">match</span> l <span style="color:#8b008b;font-weight:bold">with</span>
+  | h :: [] -&gt; <span style="color:#8b008b;font-weight:bold">assert</span> (index l 0 = a)
+  | h :: tl -&gt; <span style="color:#8b008b;font-weight:bold">assert</span> (forall (i:nat{i+1 &lt; length l}). index l (i+1) = index tl i);
+             <span style="color:#8b008b;font-weight:bold">assert</span> (index l 0 = a);
+             <span style="color:#8b008b;font-weight:bold">assert</span> (count a l = 1 + count a tl);
+             counting_lemma tl a</code></pre></div>
+<p>Second, we prove that if two boolean lists <code>l1</code> and <code>l2</code> of equal length are such that for every <code>true</code> element of <code>l1</code> there is a <code>true</code> element of <code>l2</code> at the same index, then <code>l2</code> has at least as many <code>true</code> values as <code>l1</code>.
+To get this proof to work, we need to make some observations about the relationship between indices in a list and in the tail of the list:</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> increasing_count_lemma: l1: <span style="color:#00688b;font-weight:bold">list</span> <span style="color:#00688b;font-weight:bold">bool</span> -&gt; l2: <span style="color:#00688b;font-weight:bold">list</span> <span style="color:#00688b;font-weight:bold">bool</span>{length l1 = length l2} -&gt;
+              <span style="color:#008b45;font-weight:bold">Lemma</span> (requires forall j. (index l1 j = true) ==&gt; (index l2 j = true))
+                    (ensures count true l2 &gt;= count true l1)
+<span style="color:#8b008b;font-weight:bold">let</span> <span style="color:#8b008b;font-weight:bold">rec</span> increasing_count_lemma l1 l2 = <span style="color:#8b008b;font-weight:bold">match</span> l1, l2 <span style="color:#8b008b;font-weight:bold">with</span>
+  | h1 :: tl1, h2 :: tl2 -&gt; <span style="color:#8b008b;font-weight:bold">assert</span> (h1 = index l1 0);
+                         <span style="color:#8b008b;font-weight:bold">assert</span> (forall k. (index tl1 k = index l1 (k + 1)));
+                         <span style="color:#8b008b;font-weight:bold">assert</span> (forall k. (index tl1 k = true) ==&gt; (index tl2 k = true));
+                         increasing_count_lemma tl1 tl2;
+                         <span style="color:#8b008b;font-weight:bold">assert</span> (count true l2 &gt;= count true l1)
+  | [], [] -&gt; ()</code></pre></div>
+<p>Third, we prove that if two lists of equal length agree in each index, then the lists are equal:</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> pointwise_list_equality_lemma: l1: <span style="color:#00688b;font-weight:bold">list</span> <span style="color:#00688b;font-weight:bold">bool</span> -&gt; l2: <span style="color:#00688b;font-weight:bold">list</span> <span style="color:#00688b;font-weight:bold">bool</span>{length l1 = length l2} -&gt;
+              <span style="color:#008b45;font-weight:bold">Lemma</span> (requires forall i. (index l1 i = index l2 i))
+                    (ensures l1 = l2)
+<span style="color:#8b008b;font-weight:bold">let</span> <span style="color:#8b008b;font-weight:bold">rec</span> pointwise_list_equality_lemma l1 l2 = <span style="color:#8b008b;font-weight:bold">match</span> l1, l2 <span style="color:#8b008b;font-weight:bold">with</span>
+  | [], [] -&gt; ()
+  | h1 :: tl1, h2 :: tl2 -&gt;
+    <span style="color:#8b008b;font-weight:bold">assert</span> (index l1 0 = h1 /<span style="color:#a61717;background-color:#e3d2d2">\</span> index l2 0 = h2);
+    <span style="color:#8b008b;font-weight:bold">assert</span> (h1 = h2);
+
+    <span style="color:#8b008b;font-weight:bold">assert</span> (forall j. (index tl1 j = index l2 (j+1)));
+    pointwise_list_equality_lemma tl1 tl2;
+    <span style="color:#8b008b;font-weight:bold">assert</span> (tl1 = tl2)</code></pre></div>
+<p>Finally, we prove that if two boolean lists agree in every index except one, then the number of <code>true</code> elements cannot differ by more than <code>1</code> between the lists.</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> decreasing_count_lemma: l1: <span style="color:#00688b;font-weight:bold">list</span> <span style="color:#00688b;font-weight:bold">bool</span> -&gt; l2: <span style="color:#00688b;font-weight:bold">list</span> <span style="color:#00688b;font-weight:bold">bool</span>{length l1 = length l2} -&gt; i:nat{i &lt; length l1} -&gt;
+                  <span style="color:#008b45;font-weight:bold">Lemma</span> (requires forall j. (i = j <span style="color:#a61717;background-color:#e3d2d2">\</span>/ index l1 j = index l2 j))
+                        (ensures count true l2 &gt;= (count true l1) - 1)
+<span style="color:#8b008b;font-weight:bold">let</span> <span style="color:#8b008b;font-weight:bold">rec</span> decreasing_count_lemma l1 l2 i = <span style="color:#8b008b;font-weight:bold">match</span> l1, l2 <span style="color:#8b008b;font-weight:bold">with</span>
+  | h1 :: tl1, h2 :: tl2 -&gt;
+    <span style="color:#8b008b;font-weight:bold">assert</span> (forall j. (index tl1 j = index l1 (j+1)));
+    <span style="color:#8b008b;font-weight:bold">match</span> i <span style="color:#8b008b;font-weight:bold">with</span>
+      | 0 -&gt;
+        <span style="color:#8b008b;font-weight:bold">assert</span> (forall j. (index tl1 j = index tl2 j));
+        pointwise_list_equality_lemma tl1 tl2;
+        <span style="color:#8b008b;font-weight:bold">assert</span> (tl1 = tl2);
+        <span style="color:#8b008b;font-weight:bold">assert</span> (count true tl1 = count true tl2)
+      | _ -&gt;
+        <span style="color:#8b008b;font-weight:bold">assert</span> (h1 = index l1 0 /<span style="color:#a61717;background-color:#e3d2d2">\</span> h2 = index l2 0);
+        <span style="color:#8b008b;font-weight:bold">assert</span> (h1 = h2);
+        decreasing_count_lemma tl1 tl2 (i-1)</code></pre></div>
+<p>With these lemmas in place, we are ready to return to the water tank example.
+</p>
+</details></p>
+
+<h2 id="proving-properties-of-stateful-functions-using-ghost-values">Proving properties of stateful functions using ghost values</h2>
+
+<p>Let us now consider the overflow constraint.
+It says that if the input valve, i.e. valve 0, is open then at least two of the other valves must also be open.
+We begin by writing a pure function <code>non_overflowing</code> which determines if this property holds for some list:</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> non_overflowing: state -&gt; <span style="color:#00688b;font-weight:bold">bool</span>
+<span style="color:#8b008b;font-weight:bold">let</span> non_overflowing vs = <span style="color:#8b008b;font-weight:bold">match</span> vs <span style="color:#8b008b;font-weight:bold">with</span>
+  vi :: vos -&gt; (not vi) || count true vos &gt;= 2</code></pre></div>
+<p>This function splits the state into the state of the input valve, <code>vi</code>, and the states of the output valves, <code>vos</code>.
+A state in which the water tank does not overflow is one where either the input valve is closed, i.e. <code>not vi</code> holds, or where the number of open output valves, <code>count true vos</code>, is at least two.</p>
+
+<p>Our first goal is to prove that the result of calling <code>open_all'</code> is a state where the tank is not overflowing.
+The reason this holds is that if every valve is open, then the number of open output valves is equal to the total number of output valves, which is greater than or equal to the 2 required for not overflowing.
+This can be expressed in a pure lemma, using the <code>counting_lemma</code> from the previous section, as follows.</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> all_open_is_non_overflowing: vs: state -&gt;
+                 <span style="color:#008b45;font-weight:bold">Lemma</span> (requires (forall i. (index vs i) = true))
+                       (ensures non_overflowing vs)
+<span style="color:#8b008b;font-weight:bold">let</span> all_open_is_non_overflowing vs = <span style="color:#8b008b;font-weight:bold">match</span> vs <span style="color:#8b008b;font-weight:bold">with</span>
+  vi :: vos -&gt;
+  <span style="color:#8b008b;font-weight:bold">assert</span> (forall (i:nat{i+1 &lt; length vs}). index vs (i+1) = index vos i);
+  counting_lemma vos true;
+  <span style="color:#8b008b;font-weight:bold">assert</span> (count true vos = length vos);
+  <span style="color:#8b008b;font-weight:bold">assert</span> (non_overflowing vs)</code></pre></div>
+<p>We now need to prove that this lemma translates to a property of the stateful function <code>open_all'</code>.
+The crucial part in being able to do this is having access to the state of the water tank system in function definitions, in order to invoke the <code>all_open_is_non_overflowing</code> lemma on the final state of <code>open_all'</code>.
+The type signature of a function reading the state is simple.
+It would look something like this: <code>unit -&gt; Tank state (fun vs0 -&gt; True) (fun vs0 x vs2 -&gt; vs0 = x /\ vs0 = vs2)</code>.
+However, we have no function in the water tank interface which allows us to read the state, so we cannot supply any implementation of this function.
+Since we only intend to use it in type signatures and proofs, which are erased when the code is extracted, this is not a problem in itself.
+However, having a function which crashes or behaves incorrectly at runtime if you use it in the wrong context is dangerous.
+Luckily, there is a way of resolving this using <code>FStar.Ghost</code>.</p>
+
+<p>Before getting to <code>FStar.Ghost</code>, let us briefly discuss the effect <code>GTot</code>.
+Functions with the <code>GTot</code> effect are total functions which can be used freely in type specifications, but not at all in function bodies.
+They represent functions which cannot actually be executed at runtime, but can be reasoned about at type checking time.
+As an example, consider the function <code>f</code> defined as follows.</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> f: nat -&gt; <span style="color:#008b45;font-weight:bold">GTot</span> nat
+<span style="color:#8b008b;font-weight:bold">let</span> f n = n + 5</code></pre></div>
+<p>As promised, this function can be used to describe the types of other functions, so this definition of <code>g</code> type checks:</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> g: n:nat{f n &lt; 10} -&gt; k:nat{f k &lt; 12}
+<span style="color:#8b008b;font-weight:bold">let</span> g n = n + 2</code></pre></div>
+<p>However, trying to type check the following definition of <code>h</code> gives the error <code>Computed type &quot;nat&quot; and effect &quot;GTot&quot; is not compatible with the annotated type &quot;nat&quot; effect &quot;Tot&quot;</code>.</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> h: nat -&gt; nat
+<span style="color:#8b008b;font-weight:bold">let</span> h n = f (n + 2)</code></pre></div>
+<p>The module <code>FStar.Ghost</code> contains two important functions called <code>hide</code> and <code>reveal</code>, and a type called <code>erased</code>.
+Their types and implementations are as follows:</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml">[@erasable]
+noeq
+<span style="color:#8b008b;font-weight:bold">type</span> erased (a:<span style="color:#008b45;font-weight:bold">Type</span>) =
+  | <span style="color:#008b45;font-weight:bold">E</span> <span style="color:#8b008b;font-weight:bold">of</span> a
+
+<span style="color:#8b008b;font-weight:bold">val</span> hide: #a:<span style="color:#008b45;font-weight:bold">Type</span> u#a -&gt; a -&gt; <span style="color:#008b45;font-weight:bold">Tot</span> (erased a)
+<span style="color:#8b008b;font-weight:bold">let</span> hide #a x = <span style="color:#008b45;font-weight:bold">E</span> x
+
+<span style="color:#8b008b;font-weight:bold">val</span> reveal : #a:<span style="color:#008b45;font-weight:bold">Type</span> u#a -&gt; erased a -&gt; <span style="color:#008b45;font-weight:bold">GTot</span> a
+<span style="color:#8b008b;font-weight:bold">let</span> reveal #a (<span style="color:#008b45;font-weight:bold">E</span> x) = x</code></pre></div>
+<p>The <code>hide</code> function takes any value, and wraps it in <code>erased</code>, which in itself is not very exciting.
+However, the only way of getting the value back is by calling <code>reveal</code> to unwrap it again.
+Since <code>reveal</code> has effect <code>GTot</code>, any value which has been hidden by <code>hide</code> can only be used in type specifications.</p>
+
+<p>We can use this fact to define a <code>get_tank_state</code> function, which gives the current state of the water tank system.
+The fact that <code>get_tank_state ()</code> is the current state of the system is encoded in the post-condition <code>vs0 = reveal x</code>.
+Since the return value of <code>get_tank_state</code> has type <code>erased state</code>, which the compiler extracts to the type <code>unit</code>, it cannot actually be used at runtime, so we do not need to specify an implementation of the function.</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml">assume <span style="color:#8b008b;font-weight:bold">val</span> get_tank_state: <span style="color:#00688b;font-weight:bold">unit</span> -&gt; <span style="color:#008b45;font-weight:bold">Tank</span> (<span style="color:#008b45;text-decoration:underline">FStar</span>.<span style="color:#008b45;text-decoration:underline">Ghost</span>.erased state)
+                                (<span style="color:#8b008b;font-weight:bold">fun</span> vs0 -&gt; <span style="color:#008b45;font-weight:bold">True</span>)
+                                (<span style="color:#8b008b;font-weight:bold">fun</span> vs0 x vs1 -&gt; vs0 = <span style="color:#008b45;text-decoration:underline">FStar</span>.<span style="color:#008b45;text-decoration:underline">Ghost</span>.reveal x /<span style="color:#a61717;background-color:#e3d2d2">\</span> vs0 = vs1)</code></pre></div>
+<p>With this, we can define a function <code>open_all</code> which does exactly what <code>open_all'</code> does, but additionally ensures that the resulting state of the water tank system is not overflowing.
+The only difference in the types of <code>open_all'</code> and <code>open_all</code> is that we have now added the post-condition <code>non_overflowing vs1</code>.
+We define <code>open_all</code> by first calling <code>open_all'</code>, and then capturing the resulting state with <code>get_tank_state</code> in order to pass it to the lemma <code>all_open_is_nonoverflowing</code>.
+This is sufficient for the stronger post-condition to be accepted by the type checker.</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> open_all: <span style="color:#00688b;font-weight:bold">unit</span> -&gt; <span style="color:#008b45;font-weight:bold">Tank</span> <span style="color:#00688b;font-weight:bold">unit</span>
+                          (<span style="color:#8b008b;font-weight:bold">fun</span> _ -&gt; <span style="color:#008b45;font-weight:bold">True</span>)
+                          (<span style="color:#8b008b;font-weight:bold">fun</span> _ _ vs1 -&gt; (non_overflowing vs1) /<span style="color:#a61717;background-color:#e3d2d2">\</span>
+                                       (forall i. (index vs1 i) = true))
+<span style="color:#8b008b;font-weight:bold">let</span> open_all () = open_all&#39; ();
+  <span style="color:#8b008b;font-weight:bold">let</span> vs = get_tank_state () <span style="color:#8b008b;font-weight:bold">in</span> (
+    all_open_is_non_overflowing vs;
+    <span style="color:#8b008b;font-weight:bold">assert</span> (non_overflowing vs))</code></pre></div>
+<h2 id="completing-the-safe-water-tank-controller-interface">Completing the safe water tank controller interface</h2>
+
+<p>With the definition of <code>open_all</code> in place, we can proceed similarly to give definitions of the other functions.
+The definition of <code>close_all</code> is completely analogous to <code>open_all</code>:
+We add the post-condition <code>non_overflowing vs1</code>, and use <code>get_tank_state</code> to be able to reason about the resulting state.
+In this case, to see that the tank is not overflowing it is sufficient to observe that the input valve is closed.</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> close_all: <span style="color:#00688b;font-weight:bold">unit</span> -&gt; <span style="color:#008b45;font-weight:bold">Tank</span> <span style="color:#00688b;font-weight:bold">unit</span>
+                           (<span style="color:#8b008b;font-weight:bold">fun</span> _ -&gt; <span style="color:#008b45;font-weight:bold">True</span>)
+                           (<span style="color:#8b008b;font-weight:bold">fun</span> _ _ vs1 -&gt; (non_overflowing vs1) /<span style="color:#a61717;background-color:#e3d2d2">\</span>
+                                        (forall i. (index vs1 i) = false))
+<span style="color:#8b008b;font-weight:bold">let</span> close_all () = close_all&#39; ();
+  <span style="color:#8b008b;font-weight:bold">let</span> vs = get_tank_state () <span style="color:#8b008b;font-weight:bold">in</span> (
+    <span style="color:#8b008b;font-weight:bold">assert</span> (index vs 0 = false)
+  )</code></pre></div>
+<p>The definition of <code>open_valve</code> is more interesting, since it cannot be called at any time without causing the water tank to overflow.
+In other words, it requires additional preconditions to ensure that the resulting state is non-overflowing.
+The necessary preconditions, and a proof that they are sufficient, are as follows:</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> open_valve: i: valve -&gt; <span style="color:#008b45;font-weight:bold">Tank</span> <span style="color:#00688b;font-weight:bold">unit</span>
+            (<span style="color:#8b008b;font-weight:bold">fun</span> vs -&gt; non_overflowing vs
+                  /<span style="color:#a61717;background-color:#e3d2d2">\</span> index vs i = false
+                  /<span style="color:#a61717;background-color:#e3d2d2">\</span> (i &gt; 0 <span style="color:#a61717;background-color:#e3d2d2">\</span>/ count true (tail vs) &gt;= 2))
+            (<span style="color:#8b008b;font-weight:bold">fun</span> vs0 _ vs1 -&gt; non_overflowing vs1
+                  /<span style="color:#a61717;background-color:#e3d2d2">\</span> index vs1 i = true
+                  /<span style="color:#a61717;background-color:#e3d2d2">\</span> (forall j. i = j <span style="color:#a61717;background-color:#e3d2d2">\</span>/ index vs0 j = index vs1 j))
+<span style="color:#8b008b;font-weight:bold">let</span> open_valve i =
+  <span style="color:#8b008b;font-weight:bold">let</span> vs1 = get_tank_state () <span style="color:#8b008b;font-weight:bold">in</span>
+  open_valve&#39; i;
+  <span style="color:#8b008b;font-weight:bold">let</span> vs2 = get_tank_state () <span style="color:#8b008b;font-weight:bold">in</span>
+  <span style="color:#8b008b;font-weight:bold">assert</span> (i &gt; 0 /<span style="color:#a61717;background-color:#e3d2d2">\</span> index vs1 0 = false ==&gt; index vs2 0 = false /<span style="color:#a61717;background-color:#e3d2d2">\</span> non_overflowing vs2);
+
+  <span style="color:#8b008b;font-weight:bold">assert</span> (forall j. ((index vs1 j = true) ==&gt; (index vs2 j = true)));
+  <span style="color:#8b008b;font-weight:bold">assert</span> (forall j. index (tail vs1) j = index vs1 (j+1));
+  <span style="color:#8b008b;font-weight:bold">assert</span> (forall j. ((index (tail vs1) j = true) ==&gt; (index (tail vs2) j = true)));
+  increasing_count_lemma (tail vs1) (tail vs2)</code></pre></div>
+<p>The only function which remains before we have a safe interface to the water tank controller is <code>close_valve</code>.
+It&rsquo;s definition is similar to the one for <code>open_valve</code>:</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml"><span style="color:#8b008b;font-weight:bold">val</span> close_valve: i: valve -&gt; <span style="color:#008b45;font-weight:bold">Tank</span> <span style="color:#00688b;font-weight:bold">unit</span>
+              (<span style="color:#8b008b;font-weight:bold">fun</span> vs -&gt; non_overflowing vs
+                    /<span style="color:#a61717;background-color:#e3d2d2">\</span> index vs i = true
+                    /<span style="color:#a61717;background-color:#e3d2d2">\</span> (i = 0 <span style="color:#a61717;background-color:#e3d2d2">\</span>/ count true (tail vs) &gt;= 3))
+              (<span style="color:#8b008b;font-weight:bold">fun</span> vs0 _ vs1 -&gt; non_overflowing vs1
+                           /<span style="color:#a61717;background-color:#e3d2d2">\</span> index vs1 i = false
+                           /<span style="color:#a61717;background-color:#e3d2d2">\</span> (forall j. i = j <span style="color:#a61717;background-color:#e3d2d2">\</span>/ index vs0 j = index vs1 j))
+<span style="color:#8b008b;font-weight:bold">let</span> close_valve i =
+  <span style="color:#8b008b;font-weight:bold">let</span> vs1 = get_tank_state () <span style="color:#8b008b;font-weight:bold">in</span>
+  close_valve&#39; i;
+  <span style="color:#8b008b;font-weight:bold">let</span> vs2 = get_tank_state () <span style="color:#8b008b;font-weight:bold">in</span>
+  <span style="color:#8b008b;font-weight:bold">match</span> i <span style="color:#8b008b;font-weight:bold">with</span>
+    | 0 -&gt; <span style="color:#8b008b;font-weight:bold">assert</span> (non_overflowing vs1)
+    | _ -&gt;
+      <span style="color:#8b008b;font-weight:bold">assert</span> (forall j. (index (tail vs1) j = index vs1 (j+1)));
+      decreasing_count_lemma (tail vs1) (tail vs2) (i-1);
+      <span style="color:#8b008b;font-weight:bold">assert</span> (1 + count true (tail vs2) = count true (tail vs1))</code></pre></div>
+<h2 id="conclusion">Conclusion</h2>
+
+<p>In this post, we started from a hypothetical external library containing functions for manipulating the state of an external system.
+Using the effect system in F*, we created a wrapper for the library which enforces certain correctness conditions at compile time.
+We did so by defining a custom state effect using <code>STATE_h</code>.
+The implementation was conceptually split into two parts.
+The first part was to give the functions in the library types which faithfully model the effect they have on the external state, but which do not prevent the functions from being used incorrectly.
+The second part was to refine the types by adding preconditions which allow the type checker to verify that the functions are not called when it is not safe to do so.</p>
+
+<h2 id="appendix">Appendix</h2>
+
+<h3 id="predicate-transformers-weakest-preconditions-and-effect-lifting">Predicate transformers, weakest preconditions, and effect lifting</h3>
+
+<p><a id="org56ece71"></a></p>
+
+<p>This appendix explains the definition of the function <code>pure_lift</code> from the section &ldquo;Defining an effect&rdquo;.
+The explanation here is intended to be true in spirit, but not in detail; it has been simplified, and is not true if taken literally.
+In particular, the types we give for predicates here have codomain <code>bool</code>, rather than the more correct <code>Type</code>.</p>
+
+<p>This topic is also explained in the section &ldquo;<em>9. Specifying effects</em>&rdquo; (in particular in sections &ldquo;<em>9.1. Background: Generating compact verification conditions</em>&rdquo;, &ldquo;<em>9.3. The <code>PURE</code> effect</em>&rdquo;, and &ldquo;<em>9.5. Lifting effects</em>&rdquo;) in the <a href="https://fstar-lang.org/tutorial/tutorial.html#sec-specifying-effects">F* tutorial</a>.
+However, that section is not easy to absorb on a first read-through, so I would recommend reading, in parallel with Section 9 of the tutorial, the following papers which, while significantly longer and deeper, provide more context:</p>
+
+<ul>
+<li><strong><a href="https://www.fstar-lang.org/papers/dm4free/">Dijkstra Monads for Free</a></strong> <em>(Danel Ahman, Catalin Hritcu, Kenji Maillard, Guido Martínez, Gordon Plotkin, Jonathan Protzenko, Aseem Rastogi, Nikhil Swamy)</em>, In 44th ACM SIGPLAN Symposium on Principles of Programming Languages (POPL), ACM, 2017.</li>
+<li><strong><a href="https://www.microsoft.com/en-us/research/publication/verifying-higher-order-programs-with-the-dijkstra-monad/">Verifying Higher-order Programs with the Dijkstra Monad</a></strong> <em>(Nikhil Swamy, Joel Weinberger, Cole Schlesinger, Juan Chen, Benjamin Livshits)</em>, In Proceedings of the 34th annual ACM SIGPLAN conference on Programming Language Design and Implementation, 2013.</li>
+</ul>
+
+<p>Suppose that we have some function <code>f: b -&gt; Tot a</code>, and some property <code>p: a -&gt; bool</code>, and that we want to prove that the return value of <code>f</code> always satisfies the property <code>p</code>.
+What do we need to prove to ensure that this is the case?
+What we need to prove depends on the function <code>f</code>; if <code>f</code> is a constant function which always return the same value <code>y</code>, then we only need to prove that <code>p y</code> is true, but in general we would need to prove something more involved.
+When we define the function <code>f</code>, F* automatically computes something called a &ldquo;predicate transformer&rdquo; corresponding to <code>f</code>.
+This predicate transformer, which we will denote <code>wp</code>, takes any predicate <code>a -&gt; bool</code>, for instance <code>p</code>, and computes what needs to be proved to ensure that the return value of <code>f</code> always satisfies <code>p</code>.
+All such predicate transformers for pure functions have the type <code>pure_wp</code>, which is defined in <code>ulib/prims.fst</code> in the F* standard library.</p>
+
+<p>Consider now the analog of this for functions with the <code>TANK</code> effect, which can modify some state of type <code>state</code>.
+The properties we would like to prove about the return type of some <code>TANK</code> function have the form <code>p: a -&gt; state -&gt; bool</code> rather than just <code>p: a -&gt; bool</code> as for pure functions, since we are interested in proving things about both the return value (which has type <code>a</code>), and the resulting state after the function has been executed (which has type <code>state</code>).
+In addition, what needs to be proved to ensure that some property <code>p</code> holds for the resulting state and return value depends on the state before the function has been run.
+Taking all this together, the analog of <code>wp</code> (corresponding to the pure function <code>f</code> above) for a function <code>g</code> with the <code>TANK</code> effect would be something which takes as arguments a property <code>p: a -&gt; state -&gt; bool</code> and an initial state <code>x: state</code>, and computes what needs to be proved in order for the property <code>p</code> to hold for the resulting state and return value of <code>g</code>.</p>
+
+<p>We are now in a position to explain what <code>pure_lift</code> is doing in the section <a href="#orgf2e0c12">Defining an effect</a>.
+It takes as an argument <code>wp</code>, which is the predicate transformer corresponding to some pure function <code>f</code>.
+It then produces a predicate transformer for the same function <code>f</code>, but viewed as a <code>TANK</code> function rather than a <code>PURE</code> function.
+This new predicate transformer takes a property <code>p: a -&gt; state -&gt; bool</code>, which we would like to prove holds for the resulting state and return value of <code>f</code>, together with the initial state <code>x: state</code> which is the state before running <code>f</code>.
+To prove that the property <code>p</code> holds after the function <code>f</code> has been executed, what do we need to prove?
+If we denote the return value of <code>f</code> by <code>y</code>, and the resulting state by <code>x1</code>, then what we want to prove is <code>p y x1</code>.
+However, <code>f</code> is a pure function, so <code>x1 = x</code>.
+This means that we want to prove <code>p y x</code>, where <code>y</code> is the return value of <code>f</code>.
+Hence the property we want to prove after observing that <code>x1 = x</code> is <code>fun y -&gt; p y x</code>, which has the type <code>a -&gt; bool</code>.
+This is now a property which does not depend on the resulting state of <code>f</code>, and hence can be considered a property of the pure function <code>f</code> (albeit parameterized by an initial state <code>x</code>).
+At our disposal we have <code>wp</code>, which tells us what needs to be proved to ensure that some property holds for <code>f</code> viewed as a pure function.
+We can plug the property <code>fun y -&gt; p y x</code> into <code>wp</code>, and that will tell us what needs to be proved in order to guarantee that <code>p</code> holds.
+We have then arrived at the definition of <code>pure_lift</code>:</p>
+<div class="highlight"><pre style="background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4"><code class="language-ocaml" data-lang="ocaml">unfold <span style="color:#8b008b;font-weight:bold">let</span> pure_lift (a:<span style="color:#008b45;font-weight:bold">Type</span>) (wp:pure_wp a) = <span style="color:#8b008b;font-weight:bold">fun</span> (p: a -&gt; state -&gt; <span style="color:#008b45;font-weight:bold">Type</span>) (x: state) -&gt; wp (<span style="color:#8b008b;font-weight:bold">fun</span> y -&gt; p y x)</code></pre></div>
+        </div>
+        <div class="article-info">
+    
+        <div class="article-date">2020-11-14</div>
+    
+    <div class="article-taxonomies">
+        
+            <ul class="article-categories">
+                
+                    <li><a href="/fstar-in-practice/categories/effects">effects</a></li>
+                
+            </ul>
+            
+            
+                <ul class="article-tags">
+                    
+                        <li><a href="/fstar-in-practice/tags/effects">#effects</a></li>
+                    
+                </ul>
+        
+    </div>
+</div>
+
+    </article>
+
+
+        </main>
+        <footer>
+            
+                <p><br></p>
+
+            
+        </footer>
+    </div>
+</body>
+</html>

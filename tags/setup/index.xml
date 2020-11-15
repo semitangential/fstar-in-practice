@@ -314,23 +314,23 @@ The example we will run is &lt;a href=&#34;./examples/Example.Executable.fst&#34
 &lt;div class=&#34;highlight&#34;&gt;&lt;pre style=&#34;background-color:#eed;-moz-tab-size:4;-o-tab-size:4;tab-size:4&#34;&gt;&lt;code class=&#34;language-makefile&#34; data-lang=&#34;makefile&#34;&gt;&lt;span style=&#34;color:#008b45&#34;&gt;all&lt;/span&gt;: out/ExampleExecutable
 
 &lt;span style=&#34;color:#008b45&#34;&gt;check&lt;/span&gt;: Example.Executable.fst
-        ~/opt/fstar/bin/fstar.exe --use_hints --use_hint_hashes --record_hints --cache_checked_modules Example.Executable.fst
+	~/opt/fstar/bin/fstar.exe --use_hints --use_hint_hashes --record_hints --cache_checked_modules Example.Executable.fst
 
 &lt;span style=&#34;color:#008b45&#34;&gt;clean&lt;/span&gt;:
-        rm -rf codegen/
-        rm -rf out/
+	rm -rf codegen/
+	rm -rf out/
 
 &lt;span style=&#34;color:#008b45&#34;&gt;codegen&lt;/span&gt;:
-        mkdir codegen
+	mkdir codegen
 
 &lt;span style=&#34;color:#008b45&#34;&gt;out&lt;/span&gt;:
-        mkdir out
+	mkdir out
 
 &lt;span style=&#34;color:#008b45&#34;&gt;ocaml&lt;/span&gt;: codegen Example.Executable.fst
-        ~/opt/fstar/bin/fstar.exe --use_hints --use_hint_hashes --record_hints --cache_checked_modules --odir codegen --codegen OCaml --extract &lt;span style=&#34;color:#cd5555&#34;&gt;&amp;#39;Example.Executable&amp;#39;&lt;/span&gt; Example.Executable.fst
+	~/opt/fstar/bin/fstar.exe --use_hints --use_hint_hashes --record_hints --cache_checked_modules --odir codegen --codegen OCaml --extract &lt;span style=&#34;color:#cd5555&#34;&gt;&amp;#39;Example.Executable&amp;#39;&lt;/span&gt; Example.Executable.fst
 
 &lt;span style=&#34;color:#008b45&#34;&gt;out/ExampleExecutable&lt;/span&gt;: ocaml out
-        &lt;span style=&#34;color:#00688b&#34;&gt;OCAMLPATH&lt;/span&gt;=~/opt/fstar/bin/ opam &lt;span style=&#34;color:#658b00&#34;&gt;exec&lt;/span&gt; -- ocamlfind opt -package fstarlib -linkpkg -g codegen/Example_Executable.ml -o out/ExampleExecutable
+	&lt;span style=&#34;color:#00688b&#34;&gt;OCAMLPATH&lt;/span&gt;=~/opt/fstar/bin/ opam &lt;span style=&#34;color:#658b00&#34;&gt;exec&lt;/span&gt; -- ocamlfind opt -package fstarlib -linkpkg -g codegen/Example_Executable.ml -o out/ExampleExecutable
 &lt;/code&gt;&lt;/pre&gt;&lt;/div&gt;
 &lt;p&gt;The idea with this Makefile is to have something fairly minimal. For real projects it might be a good idea to include &lt;code&gt;ulib/ml/Makefile.include&lt;/code&gt;.&lt;/p&gt;
 
